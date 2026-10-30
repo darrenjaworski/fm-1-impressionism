@@ -21,18 +21,24 @@ static rgb_t lerp_rgb(rgb_t a, rgb_t b, uint32_t t, uint32_t t_max)   /* t/t_max
 /* Monet's Water Lilies palette (user-specified, 2026-10-30, picked by eye from the reference painting): purple
    flowers over blue-green water and teal-green pads. Every reactive colour below is anchored to one of these
    five, not an invented hue -- "support this colour palette" means the whole pond stays inside it. */
+
+/* Water (ENC_KNOB2 controls brightness: dark at 0, light at 31) */
 #define MONET_WATER_DARK_R 0x3Bu
 #define MONET_WATER_DARK_G 0x66u
 #define MONET_WATER_DARK_B 0x8Cu
 #define MONET_WATER_LIGHT_R 0x58u
 #define MONET_WATER_LIGHT_G 0x88u
 #define MONET_WATER_LIGHT_B 0xA6u
+
+/* Lily pad leaves (two tones per cell for texture) */
 #define MONET_LEAF_DARK_R 0x3Cu
 #define MONET_LEAF_DARK_G 0x7Au
 #define MONET_LEAF_DARK_B 0x6Au
 #define MONET_LEAF_LIGHT_R 0x8Du
 #define MONET_LEAF_LIGHT_G 0xB8u
 #define MONET_LEAF_LIGHT_B 0x5Fu
+
+/* Flower blooms (maj7 at full brightness, add9 dimmed ~70%) */
 #define MONET_FLOWER_R 0x84u
 #define MONET_FLOWER_G 0x51u
 #define MONET_FLOWER_B 0xA6u

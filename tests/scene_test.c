@@ -15,17 +15,17 @@ int main(void)
        off the actual reference colours without this test noticing. */
     {
         rgb_t water_lo = color_to_water_rgb(0), water_hi = color_to_water_rgb(31);
-        check(water_lo.r == 0x3B && water_lo.g == 0x66 && water_lo.b == 0x8C, "water at color=0 is the painting's deep blue, #3B668C");
-        check(water_hi.r == 0x58 && water_hi.g == 0x88 && water_hi.b == 0xA6, "water at color=31 is the painting's lit blue-teal, #5888A6");
+        check(water_lo.r == MONET_WATER_DARK_R && water_lo.g == MONET_WATER_DARK_G && water_lo.b == MONET_WATER_DARK_B, "water at color=0 is the painting's deep blue");
+        check(water_hi.r == MONET_WATER_LIGHT_R && water_hi.g == MONET_WATER_LIGHT_G && water_hi.b == MONET_WATER_LIGHT_B, "water at color=31 is the painting's lit blue-teal");
         check(water_hi.r > water_lo.r && water_hi.g > water_lo.g && water_hi.b > water_lo.b, "water brightens uniformly as color rises (no hue shift, just darker/lighter)");
     }
 
     /* Seam F: the bloom palette. One colour per chord template (CHORD_MAJ7/CHORD_ADD9, planing.h); both anchored
-       to the painting's single purple flower colour (#8451A6, user-specified exactly, not a derived hue) --
+       to the painting's single purple flower colour (user-specified exactly, not a derived hue) --
        the two templates read as distinct via brightness, not by inventing a second colour not in the reference. */
     {
         rgb_t maj7 = chord_templ_to_bloom_rgb(0), add9 = chord_templ_to_bloom_rgb(1);
-        check(maj7.r == 0x84 && maj7.g == 0x51 && maj7.b == 0xA6, "maj7's bloom is the painting's flower purple, #8451A6, exactly");
+        check(maj7.r == MONET_FLOWER_R && maj7.g == MONET_FLOWER_G && maj7.b == MONET_FLOWER_B, "maj7's bloom is the painting's flower purple");
         check(maj7.r != add9.r || maj7.g != add9.g || maj7.b != add9.b, "the two chord templates get visibly different bloom brightness");
         check(add9.r <= maj7.r && add9.g <= maj7.g && add9.b <= maj7.b, "add9 is a dimmer shade of the same purple, not a different hue");
     }
@@ -37,11 +37,11 @@ int main(void)
         for (y = 0; y < POND_H; y++)
             for (x = 0; x < POND_W; x++) {
                 rgb_t c = pad_leaf_rgb(x, y);
-                if (c.r == 0x3C && c.g == 0x7A && c.b == 0x6A) saw_dark = 1;
-                else if (c.r == 0x8D && c.g == 0xB8 && c.b == 0x5F) saw_light = 1;
+                if (c.r == MONET_LEAF_DARK_R && c.g == MONET_LEAF_DARK_G && c.b == MONET_LEAF_DARK_B) saw_dark = 1;
+                else if (c.r == MONET_LEAF_LIGHT_R && c.g == MONET_LEAF_LIGHT_G && c.b == MONET_LEAF_LIGHT_B) saw_light = 1;
                 else other = 1;
             }
-        check(saw_dark && saw_light, "both leaf tones (#3C7A6A, #8DB85F) turn up across the pond");
+        check(saw_dark && saw_light, "both leaf tones turn up across the pond");
         check(!other, "leaf colour is always one of exactly those two tones, nothing else");
     }
 
