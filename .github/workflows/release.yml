@@ -107,7 +107,7 @@ jobs:
           ls -l build/impressionism-"$V"*.fwsc
           (cd build && sha256sum impressionism-"$V"*.fwsc > SHA256SUMS)
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: impressionism-fwsc
           path: build/impressionism*.fwsc
