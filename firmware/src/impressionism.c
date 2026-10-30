@@ -262,7 +262,7 @@ static void app_main(void)
                   set.scale << 11u;
     next_draw_ms = fm1_ms + 300u;                 /* the pond's shimmer redraws on its own slow tick too */
 
-    /* backlit buttons: soft ambient glow on all unused buttons, BTN_ARP gets full brightness for drone state */
+    /* backlit buttons: soft ambient glow on all unused buttons; BTN_ARP and BTN_PLAY get full brightness for state */
     fm1_led_key_glow(BTN_OCT_DOWN, 1);
     fm1_led_key_glow(BTN_OCT_UP, 1);
     fm1_led_key_glow(BTN_FX, 1);
@@ -274,8 +274,8 @@ static void app_main(void)
     fm1_led_key_glow(BTN_HOME, 1);
     fm1_led_key_glow(BTN_SAVE, 1);
     fm1_led_key_glow(BTN_SEQ, 1);
-    fm1_led_key_glow(BTN_PLAY, 1);
     fm1_led_key_glow(BTN_REC, 1);
+    /* BTN_PLAY is not glowed: it needs full brightness state control for pause/resume feedback */
 
     for (;;) {
         platform_poll();
