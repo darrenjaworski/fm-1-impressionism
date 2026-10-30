@@ -83,7 +83,7 @@ static uint32_t active_cell_count(uint32_t density, uint32_t total)
    matters is the ordering and that it's never 0). Reduced values to decrease visual churn. */
 static uint32_t ripple_step(uint32_t drift_rate)
 {
-    static const uint32_t STEP[4] = { 1u, 1u, 2u, 3u };
+    static const uint32_t STEP[4] = { 1u, 2u, 3u, 4u };
     return STEP[drift_rate];
 }
 
