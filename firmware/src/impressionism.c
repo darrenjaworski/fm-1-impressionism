@@ -355,10 +355,10 @@ static void app_main(void)
         }
         if (!paused && (int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
         if (!paused && (int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
-        voice[0].gate = set.drone_on ? GATE_FULL : 0;
+        voice[0].gate = (set.drone_on && !paused) ? GATE_FULL : 0;
         {
             uint32_t v;
-            for (v = 1; v < NV; v++) voice[v].gate = GATE_FULL;
+            for (v = 1; v < NV; v++) voice[v].gate = paused ? 0 : GATE_FULL;
         }
 
         st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
