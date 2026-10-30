@@ -84,7 +84,7 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
         run: |
           # Extract version from tag format: 0.0.1-{timestamp}-{hash}
-          V="$(echo "$TAG" | cut -d- -f1-3)"
+          V="$(echo "$TAG" | cut -d- -f1)"
           BOARD=smk37 sh build.sh --release "$V"
           BOARD=smk37 MODEL=elite sh build.sh --release "$V"
           BOARD=smk37 MODEL=mke sh build.sh --release "$V"
