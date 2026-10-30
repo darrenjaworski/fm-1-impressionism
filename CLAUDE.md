@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`fm-1-impressionism` is a from-scratch custom firmware for the **M-VAVE FM-1** pocket synthesizer. As of now the repo contains only a README — there is no firmware source checked in yet. The sections below capture the FM-1 firmware ecosystem and conventions (from thefirmwarehub.com and the open-source FM-1 firmware community) that any future work here must follow, since this device has a very specific toolchain, flash layout, and distribution model that isn't discoverable from generic embedded-C conventions.
+`fm-1-impressionism` is a custom firmware for the **M-VAVE FM-1** pocket synthesizer, scaffolded by forking [zvenson/dinghy](https://github.com/zvenson/dinghy) v0.4 (GPL-3.0-only; see `LICENSING.md` for full credits) and rebranding it. The sections below capture the FM-1 firmware ecosystem and conventions (from thefirmwarehub.com and the open-source FM-1 firmware community) that any future work here must follow, since this device has a very specific toolchain, flash layout, and distribution model that isn't discoverable from generic embedded-C conventions.
+
+**Current state**: the scaffold is rebranded and builds in host mode, but `firmware/src/impressionism.c` is still Dinghy's own stock 4-voice-sine demo, byte-for-byte — the generative-ambient engine (this file's "Mission" section) has not been written yet. Identity, package names, `STORE_MAGIC`/`DATA_FAMILY`, and the loader screen name/colour are already this project's own (not Dinghy's). Verified: `sh tests/run_host.sh` builds and runs with the system C compiler (one portability patch was needed — see `firmware/src/gfx.c`'s `DINGHY_HOST` guard around the `.pool` section attribute, which is Mach-O/clang-incompatible upstream; harmless, since it's a no-op on the real device build). **Not yet verified**: an actual on-device `.fwsc` build — that needs the closed-source JieLi toolchain + AC79 SDK (see Toolchain requirements), neither of which is set up in this environment; CI (`.github/workflows/release.yml`) builds and attests it instead. The FM-1 identity `FM-1_950` is provisional — see the Identity section below.
 
 ## Mission
 
@@ -30,40 +32,37 @@ This is a **generative ambient** instrument, not a played-note synth: the goal i
 - Commit messages follow **[Conventional Commits](https://www.conventionalcommits.org/)** (`feat:`, `fix:`, `docs:`, `chore:`, etc.) — use this for every commit in this repo, not just releases.
 - Versioning follows **[SemVer](https://semver.org/)** (`MAJOR.MINOR.PATCH`). Note the Hub/CI release workflow above tags as `vX.Y` (two-part) — once this matters, prefer full `vMAJOR.MINOR.PATCH` tags and treat a breaking change to the audio engine, panel mapping, or storage layout as a MAJOR bump, new generative/engine features as MINOR, and fixes/tuning as PATCH.
 
-## Recommended starting point
-
-Do not build a firmware from nothing — the community convention is to fork a template:
-
-- **[zvenson/dinghy](https://github.com/zvenson/dinghy)** — the recommended minimal starting template ("the smallest firmware for the M-VAVE FM-1 to build your own on"). Gives you updates/rescue, USB-MIDI, USB audio, panel/LED/screen drivers, and flash storage for free, plus a ~300-line example instrument (`dinghy.c`) to replace. This is almost certainly the right base for a single-instrument firmware like this one.
-- **[hugelton/Felucca](https://github.com/hugelton/Felucca)** — a larger multi-engine base, useful as a reference for more complex synthesis engines, and the origin of the loader most custom firmwares use.
-
-**Not yet scaffolded** — the layout and commands below are Dinghy's own conventions, for reference until this repo actually forks it in:
+## Repo layout (scaffolded from Dinghy)
 
 ```
-firmware/src/<name>.c   # application layer — the instrument itself (audio + UI)
-firmware/src/platform.c # infra: boot, USB, MIDI, update loader, audio ISR — don't touch casually
-firmware/src/store.h    # per-board flash storage layout (settings/blobs/slots)
-firmware/src/hal/       # hardware abstraction layer
-tools/                  # build.py, fm1_install.py (USB installer)
-tests/run_host.sh       # host-mode test: renders to WAV + screen PNGs, no hardware needed
-build.sh                # device build entry point
-.github/workflows/release.yml  # calls the shared signed-release workflow on tag push
-fmhub.json              # Firmware Hub listing metadata
+firmware/src/impressionism.c  # application layer — the instrument itself (audio + UI). THE file to change.
+firmware/src/platform.c       # infra: boot, USB, MIDI, update loader, audio ISR — don't touch casually
+firmware/src/store.h          # per-board flash storage layout (settings/blobs/slots); STORE_MAGIC/DATA_FAMILY here
+firmware/hal/                 # hardware abstraction layer — the only place allowed to touch raw registers
+tools/                        # build.py (device build), fm1_install.py (USB installer), fm1pkg_make.py, lz4blk.py
+tests/run_host.sh             # host-mode test: compiles with the system cc, renders to WAV + screen PNGs
+tests/run_tests.sh            # full test suite; needs a completed ./build.sh first
+build.sh                      # device build entry point (wraps tools/build.py; needs the JieLi toolchain + SDK)
+.github/workflows/release.yml # builds + attests + releases on a `vX.Y` tag push (self-contained, see below)
+fmhub.json                    # Firmware Hub listing metadata
+docs/                         # Dinghy's own API.md / MAKE-IT-YOURS.md / RULES.md / SMK37.md — still accurate upstream reference
+LICENSE, LICENSING.md         # GPL-3.0-only + per-file credit table; keep both current, see "Who made what"
 ```
 
-Build/test commands (Dinghy conventions):
+Build/test commands (as actually wired up in this repo now):
 
 ```
-tests/run_host.sh                     # host-mode: run the firmware on your dev machine, emit WAV/PNG
-./build.sh [--release X.Y] [--board fm1|smk37] [--model pro|elite|mke]   # device build -> build/<name>.fwsc
-python3 tools/fm1_install.py build/<name>.fwsc   # install over USB
+sh tests/run_host.sh                                                    # host-mode, no hardware/toolchain needed
+sh tests/run_tests.sh                                                   # full suite; needs build/impressionism.fwsc first
+./build.sh [--release X.Y] [--board fm1|smk37] [--model pro|elite|mke]  # device build -> build/impressionism.fwsc
+python3 tools/fm1_install.py build/impressionism.fwsc                   # install over USB (needs: pip install mido python-rtmidi)
 ```
 
 ## Toolchain requirements
 
 - **MCU**: JieLi PI32v2 core (AC79/AC791N family, "WL82" bootloader). Not a general-purpose target — code must go through JieLi's toolchain, not a stock ARM/clang/gcc pipeline.
-- **JieLi Windows Toolchain 2.5.3** (bundles PI32v2 clang 4.0.1) — set `FM1_PI32_TOOLCHAIN` to its `pi32` folder. On CI/Linux, the shared build workflow installs JieLi's Linux toolchain instead (`JIELI_TOOLCHAIN` env var).
-- **AC79 AIoT SDK** — closed-source binary SDK providing the device engine; cloned to `~/fw-AC79_AIoT_SDK` (`AC79_SDK` env var) by the shared CI workflow.
+- **JieLi Linux toolchain** (x86-64 only) — `tools/build.py`'s own docstring and `build.sh` are explicit about this: set `JIELI_TOOLCHAIN` to it (default `~/.jieli/toolchain`), or run `tools/get_toolchain.sh` to fetch it from pkgman.jieliapp.com (this is what `.github/workflows/release.yml` does in CI). On macOS, or anywhere non-Linux/x86-64, `build.sh` runs each toolchain step inside a `linux/amd64` Docker container instead (`JIELI_DOCKER=1`, needs Docker running) — this has **not been exercised in this session** (no Docker invoked, no toolchain downloaded).
+- **AC79 AIoT SDK** — closed-source; default `~/fw-AC79_AIoT_SDK` (`AC79_SDK` env var). CI clones it from `gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK` at tag `AC79NN_SDK_V1.2.1_2023-12-13`; `tools/build.py` checks three of its files (`uboot.boot`, `cfg_tool.bin`, `cfg/eq_cfg_hw.bin`) against known SHA-256s and only warns (doesn't fail) on a mismatch.
 - Compile with `-Os` — required for USB-MIDI stability on real hardware.
 - Build safety checks (enforced by `build.sh`) reject: 64-bit division, ROM calls, RAM overflow, and register access outside the HAL.
 
@@ -75,11 +74,11 @@ A firmware is one `.fwsc` package = two programs in sequence:
 2. **The firmware itself** — the actual instrument, split as:
    - `app_audio(int32_t *out, uint32_t n)` — audio ISR, called with an n-frame (256 @ 44.1kHz, stereo interleaved, Q15 ±32767) buffer to fill. Must be fast: no flash access, no screen calls, no blocking. Use `volatile` for anything shared with the main loop.
    - `app_main(void)` — the main loop; never returns, must call `platform_poll()` every few ms (feeds watchdog, services USB/input).
-   - Everything else (panel input, LEDs, 240×240 screen via direct draw calls or a `cv_*` canvas API, storage) is reached through `platform.c`'s HAL — see Dinghy's `docs/API.md` for the full function/constant reference once that file exists in-repo.
+   - Everything else (panel input, LEDs, 240×240 screen via direct draw calls or a `cv_*` canvas API, storage) is reached through `platform.c`'s HAL — see `docs/API.md` (in this repo, inherited from Dinghy) for the full function/constant reference, and `docs/RULES.md` for the hard build-time safety checks (`tools/build.py`'s `mmio_check`/`check`: no raw register literals or volatile pointer casts outside `firmware/hal/`, no inline asm, no ROM calls, no RAM/flash-slot overflow).
 
 **Flash layout** (1 MiB total): app code+consts (568 KB budget), RAM data+bss (96 KB), a zeroed `.pool` section for big buffers (336 KB), 24 KB stack, plus the storage region above app space — settings sector (4 KB), 8 blobs (4 KB each), 8 slots (16 KB each), each with magic/length/CRC32. Flash erases take ~50 ms with interrupts off (up to 200 ms for a full slot) — only save when audio-silent and ≥2s after the last change; sectors tolerate ~100k erases.
 
-**Identity**: every firmware announces an `FM-1_...` identity string over USB. The Hub convention is `FM-1_9XX` (taken: SLOOP 900, Felucca 91N, sloopDX 93N, zp12 97N, Dinghy 99N) — pick an unused one so the Hub can distinguish this firmware from others sharing a base.
+**Identity**: every firmware announces an `FM-1_...` identity string over USB (`tools/build.py`'s `BOARD_PREFIX`/`PRODUCT`; `firmware/src/impressionism.c`'s `FELUCCA_ID` comes from that at compile time). This project currently uses **`FM-1_95N`** (dev build: `FM-1_950`) — chosen because Dinghy's own `docs/MAKE-IT-YOURS.md` lists `900` (SLOOP), `91N` (Felucca), `93N` (sloopDX), `97N` (zp12), `98N` (a Doom port) and `99N` (Dinghy) as taken, leaving `92`/`94`/`95`/`96` apparently free as of that doc — but it also says "there is no registry yet: look at the hub, and ask there if you are unsure." **`95` has not been confirmed against the Hub's live catalogue** (`thefirmwarehub.com/kb/#ids`, which renders client-side and wasn't checkable from this session) — verify it's still unused before any public release tag, and change `BOARD_PREFIX`/`PRODUCT` in `tools/build.py` if not.
 
 ## Distribution: FM-1 Firmware Hub
 
@@ -99,24 +98,7 @@ Getting listed at [thefirmwarehub.com](https://thefirmwarehub.com/) (full rules:
   }
   ```
   The Hub re-reads this every ~3 hours.
-- A GitHub Actions release workflow for the "Built from source" attestation badge — `.github/workflows/release.yml` calling the shared reusable workflow:
-  ```yaml
-  name: release
-  on:
-    push:
-      tags: ["v*"]
-  jobs:
-    build:
-      uses: zvenson/fm1-build/.github/workflows/build.yml@v1
-      permissions:
-        contents: write
-        id-token: write
-        attestations: write
-      with:
-        build: ./build.sh --release "${GITHUB_REF_NAME#v}"
-        packages: build/*.fwsc
-  ```
-  Tagging `vX.Y` and pushing triggers a signed build; the Hub verifies the Sigstore attestation, SHA-256, and that the build came from a tagged commit via the shared workflow (not the repo's own, since that could smuggle in unreviewed binaries).
+- A GitHub Actions release workflow for the "Built from source" attestation badge. **Correction to an earlier draft of this doc**: the Hub's `/kb/` page describes a _shared reusable workflow_ (`zvenson/fm1-build/.github/workflows/build.yml@v1`) as one way to get this, reasoning that "a project's own workflow can download anything during the build... and GitHub would still sign it." Dinghy's **own actual** `.github/workflows/release.yml` (now in this repo, verified by reading it directly rather than trusting a summary) does **not** use that shared workflow — it's self-contained: it fetches the JieLi toolchain and AC79 SDK itself, builds, runs `tests/run_tests.sh`, and calls `actions/attest-build-provenance@v2` directly on the `build/impressionism-*.fwsc` files, on a `vX.Y` tag push. Since we forked Dinghy's own workflow as-is, that's what this repo has; don't swap in the shared-workflow form without a reason.
 - Real-hardware testing both directions (install from V15, and from another custom firmware) before submitting.
 
 ## Recovery / unbricking (useful when testing on real hardware)
