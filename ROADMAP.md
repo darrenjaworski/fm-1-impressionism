@@ -11,9 +11,9 @@ rather than an explicit answer, and is flagged as such.
 implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via a CI-built `.fwsc`, and
 **confirmed working by ear**. The reactive pixel-art screen below is built (Monet palette, see below), pending a by-eye check on hardware.
 
-## v1 — initial prototype
+## Initial scope (v0.0.1)
 
-**Scope is deliberately narrow** (first-real-thing-on-hardware, not the full mission palette yet):
+**What's built** (the first playable version):
 
 - Scales: **whole-tone and pentatonic only**, switchable. (Lydian/Mixolydian/Dorian come later.)
 - Chords: **template-based planing**, exactly 2 templates (intervals in semitones above the root):
@@ -71,9 +71,9 @@ Reactive mapping:
 | `ENC_ALGORITHM` (density), continuous | how many lily pads/ripples look "active" at once                        |
 | `BTN_ARP` (drone on/off)              | presence of a warm sun-glow/reflection halo (off = cooler, dimmer pond) |
 
-## Deferred to later minor versions
+## Deferred to later versions
 
-Everything in the mission not covered above, added incrementally once v1 is proven on real hardware:
+Everything in the mission not covered above, to add incrementally:
 
 - Lydian, Mixolydian, Dorian modes.
 - Quartal (stacked-4ths) and sus2/sus4 chord templates, and 11th/13th extensions beyond maj7/add9.
