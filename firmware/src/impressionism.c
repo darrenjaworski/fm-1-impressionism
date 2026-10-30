@@ -119,6 +119,7 @@ static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshi
 static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
+static uint32_t paused = 0u;                     /* pause/resume toggle (BTN_PLAY): 1 = paused, 0 = generating */
 
 static void retune_voices(uint32_t scale)
 {
@@ -299,6 +300,8 @@ static void app_main(void)
         b = fm1_input_edges(&rel);
         if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
         fm1_led_key(BTN_ARP, set.drone_on);
+        if (b & (1u << BTN_PLAY)) { paused ^= 1u; }  /* pause/resume: freezes generation, sustains current chord */
+        fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, off while paused */
 
         if (scale_drawn != set.scale) {          /* the scale changed: re-root and re-plane right away, since a
                                                      degree means a different interval in a different scale */
@@ -307,8 +310,8 @@ static void app_main(void)
             replane(set.scale, set.density, set.drift);
             scale_drawn = set.scale;
         }
-        if ((int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
-        if ((int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
+        if (!paused && (int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
+        if (!paused && (int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
         voice[0].gate = set.drone_on ? GATE_FULL : 0;
         {
             uint32_t v;
