@@ -27,12 +27,12 @@ static rgb_t lerp_rgb(rgb_t a, rgb_t b, uint32_t t, uint32_t t_max)   /* t/t_max
 #define MONET_WATER_LIGHT_R 0x58u
 #define MONET_WATER_LIGHT_G 0x88u
 #define MONET_WATER_LIGHT_B 0xA6u
-#define MONET_LEAF_DARK_R 0x28u
-#define MONET_LEAF_DARK_G 0x59u
-#define MONET_LEAF_DARK_B 0x59u
-#define MONET_LEAF_LIGHT_R 0x67u
-#define MONET_LEAF_LIGHT_G 0x8Cu
-#define MONET_LEAF_LIGHT_B 0x4Du
+#define MONET_LEAF_DARK_R 0x3Cu
+#define MONET_LEAF_DARK_G 0x7Au
+#define MONET_LEAF_DARK_B 0x6Au
+#define MONET_LEAF_LIGHT_R 0x8Du
+#define MONET_LEAF_LIGHT_G 0xB8u
+#define MONET_LEAF_LIGHT_B 0x5Fu
 #define MONET_FLOWER_R 0x84u
 #define MONET_FLOWER_G 0x51u
 #define MONET_FLOWER_B 0xA6u
@@ -74,10 +74,10 @@ static uint32_t active_cell_count(uint32_t density, uint32_t total)
 }
 
 /* ENC_KNOB1 (drift rate), 0..3 -> the water's ripple phase step per screen tick (an arbitrary small unit; what
-   matters is the ordering and that it's never 0). Tune the actual range by eye on real hardware. */
+   matters is the ordering and that it's never 0). Reduced values to decrease visual churn. */
 static uint32_t ripple_step(uint32_t drift_rate)
 {
-    static const uint32_t STEP[4] = { 1u, 2u, 4u, 7u };
+    static const uint32_t STEP[4] = { 1u, 1u, 2u, 3u };
     return STEP[drift_rate];
 }
 

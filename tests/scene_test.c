@@ -37,11 +37,11 @@ int main(void)
         for (y = 0; y < POND_H; y++)
             for (x = 0; x < POND_W; x++) {
                 rgb_t c = pad_leaf_rgb(x, y);
-                if (c.r == 0x28 && c.g == 0x59 && c.b == 0x59) saw_dark = 1;
-                else if (c.r == 0x67 && c.g == 0x8C && c.b == 0x4D) saw_light = 1;
+                if (c.r == 0x3C && c.g == 0x7A && c.b == 0x6A) saw_dark = 1;
+                else if (c.r == 0x8D && c.g == 0xB8 && c.b == 0x5F) saw_light = 1;
                 else other = 1;
             }
-        check(saw_dark && saw_light, "both leaf tones (#285959, #678C4D) turn up across the pond");
+        check(saw_dark && saw_light, "both leaf tones (#3C7A6A, #8DB85F) turn up across the pond");
         check(!other, "leaf colour is always one of exactly those two tones, nothing else");
     }
 
