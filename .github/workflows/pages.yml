@@ -79,14 +79,14 @@ jobs:
           # Extract the latest release tag and inject it into the firmware catalog
           TAG=$(gh release view --repo "${{ github.repository }}" --json tagName --jq '.tagName' 2>/dev/null || echo "")
           if [ -n "$TAG" ]; then
-            python3 -c "
+            python3 << PYTHON_EOF
           import json
           with open('dist/firmwares.json') as f:
             data = json.load(f)
           data['firmwares'][0]['version'] = '$TAG'
           with open('dist/firmwares.json', 'w') as f:
             json.dump(data, f, indent=2)
-            "
+          PYTHON_EOF
           fi
 
       - uses: actions/configure-pages@v6
