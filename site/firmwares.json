@@ -5,7 +5,7 @@
     {
       "id": "impressionism",
       "name": "Impressionism",
-      "version": "",
+      "version": "v0.4.1",
       "author": "Darren Jaworski",
       "license": "GPL-3.0",
       "about": "A generative ambient instrument in the harmonic language of Debussy/Ravel-era Impressionism: whole-tone and pentatonic drift, extended and quartal chords, parallel chord motion over a sustained drone, with no clocked sequencer. Forked from zvenson/dinghy.",

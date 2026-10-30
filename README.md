@@ -6,8 +6,6 @@ It's built to drift, not to be played: voices free-run on their own slow, semi-r
 
 ## Try it online
 
-Play it in the browser at <https://darrenjaworski.github.io/fm-1-impressionism/> — a vendored [fm1-emu](https://github.com/joakimeriksson/fm1-emu) running this project's latest release (`.github/workflows/pages.yml`, `ROADMAP.md`).
-
-**TODO**: the page doesn't show which firmware version it's running — add that.
+Play it in the browser at <https://darrenjaworski.github.io/fm-1-impressionism/> — a vendored [fm1-emu](https://github.com/joakimeriksson/fm1-emu) running this project's latest release (`.github/workflows/pages.yml`, `ROADMAP.md`). The emulator displays the currently-running firmware version in its interface.
 
 See [CLAUDE.md](./CLAUDE.md) for the full mission, firmware architecture, toolchain, and distribution notes.

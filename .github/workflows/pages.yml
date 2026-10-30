@@ -71,8 +71,23 @@ jobs:
           test -n "$fw"
           cp "$fw" dist/impressionism.fwsc # a stable name: firmwares.json's URL doesn't change release to release
 
-      - name: Point the catalog at this project's own firmware
-        run: cp impressionism/site/firmwares.json dist/firmwares.json
+      - name: Point the catalog at this project's own firmware (with latest version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp impressionism/site/firmwares.json dist/firmwares.json
+          # Extract the latest release tag and inject it into the firmware catalog
+          TAG=$(gh release view --repo "${{ github.repository }}" --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          if [ -n "$TAG" ]; then
+            python3 -c "
+          import json
+          with open('dist/firmwares.json') as f:
+            data = json.load(f)
+          data['firmwares'][0]['version'] = '$TAG'
+          with open('dist/firmwares.json', 'w') as f:
+            json.dump(data, f, indent=2)
+            "
+          fi
 
       - uses: actions/configure-pages@v6
 
