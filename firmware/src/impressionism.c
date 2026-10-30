@@ -202,13 +202,21 @@ static void draw_pond(void)
     ripple_phase += ripple_step(set.drift);
 }
 
-static void draw_screen(void)
+static void draw_chrome(void)                   /* once, at startup only: the black screen and the title never
+                                                     change again, so they never belong in a function called on
+                                                     every redraw tick (docs/RULES.md: "draw only what changed" --
+                                                     an unconditional full-screen lcd_fill here was flashing the
+                                                     whole screen black on every ~300ms pond tick, visible as a
+                                                     ~3 Hz stutter on real hardware) */
+{
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
+}
+
+static void draw_status(void)                   /* only on a real settings/chord change, not every pond tick */
 {
     char s[32];
     uint32_t i = 0;
-    lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
-    draw_pond();
     draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, SCALE_NAME[set.scale], C_WHITE, 1);
     {
         const char *p = set.drone_on ? "DRONE ON " : "DRONE OFF";
@@ -234,7 +242,9 @@ static void app_main(void)
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
-    draw_screen();
+    draw_chrome();
+    draw_pond();
+    draw_status();
     scale_drawn = set.scale;
     state_drawn = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
                   set.scale << 11u;
@@ -281,10 +291,14 @@ static void app_main(void)
 
         st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
              set.scale << 11u;
-        if (st != state_drawn || (int32_t)(fm1_ms - next_draw_ms) >= 0) {   /* a settings change, or the pond's
-                                                                                own slow shimmer tick */
+        if (st != state_drawn) {                 /* a real settings/chord change: redraw both right away */
             state_drawn = st;
-            draw_screen();
+            draw_pond();
+            draw_status();
+            next_draw_ms = fm1_ms + 300u;
+        } else if ((int32_t)(fm1_ms - next_draw_ms) >= 0) {   /* just the pond's own slow shimmer tick --
+                                                                   the title and status text never change here */
+            draw_pond();
             next_draw_ms = fm1_ms + 300u;
         }
 
