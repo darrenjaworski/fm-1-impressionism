@@ -38,6 +38,11 @@ def commits_since(tag):
 
 
 CONVENTIONAL = re.compile(r"^(\w+)(\([^)]*\))?(!)?:\s*(.*)$")
+# conventionalcommits.org: a breaking-change footer is its OWN line, "BREAKING CHANGE: " (or "BREAKING-CHANGE: ")
+# at the start of it -- not just those words appearing anywhere in the body. A naive substring check matched
+# this very script's own commit message once, which explains the rule in prose ("a `!` ... or BREAKING CHANGE:
+# major") without declaring one; that's the bug this anchoring fixes.
+BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
 
 
 def bump_for(commits):
@@ -50,7 +55,7 @@ def bump_for(commits):
         if not m:
             continue
         typ, _scope, bang, _desc = m.groups()
-        if bang or "BREAKING CHANGE" in body or "BREAKING-CHANGE" in body:
+        if bang or BREAKING_FOOTER.search(body):
             return "major"  # nothing outranks this; stop looking
         if typ == "feat":
             level = level or "minor"
