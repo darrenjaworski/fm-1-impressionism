@@ -1,0 +1,39 @@
+# fm-1-impressionism: deploy site/ to GitHub Pages (repo setting: build from GitHub Actions, not a branch).
+# Step 1 (this file): a hello-world static page, to prove the deploy pipeline itself works end to end before
+# anything emulator-related gets vendored in (ROADMAP.md's "an online playable version"). The actual emulator
+# site replaces site/'s content later; this workflow's shape (configure-pages/upload-pages-artifact/deploy-pages)
+# shouldn't need to change when that happens.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
