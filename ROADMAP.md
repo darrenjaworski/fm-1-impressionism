@@ -8,9 +8,8 @@ v1 was scoped in a `/grill-me` session; one default below was made by the agent 
 rather than an explicit answer, and is flagged as such.
 
 **Status**: the audio engine below (drone + 3 chord voices, both timers, panel mapping, persistence) is
-implemented, TDD'd (`tests/planing_test.c`), and flashed to a real connected FM-1 via a CI-built `.fwsc` —
-confirmed running by its USB-MIDI identity (`FM-1_950`), not yet by ear. The reactive pixel-art screen below is
-not built yet (still plain status text).
+implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via a CI-built `.fwsc`, and
+**confirmed working by ear**. The reactive pixel-art screen below is not built yet (still plain status text).
 
 ## v1 — initial prototype
 
