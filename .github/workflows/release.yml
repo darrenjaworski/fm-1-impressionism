@@ -1,23 +1,12 @@
-# fm-1-impressionism (forked from zvenson/dinghy): compute the next release tag (if any) from Conventional
-# Commits, then build the packages on GitHub and publish the release with a build attestation
-# (actions/attest-build-provenance) -- the Firmware Hub shows "Built from source" for exactly these files. The
-# JieLi toolchain comes from pkgman.jieliapp.com (tools/get_toolchain.sh), the AC79 SDK from gitee.com, as in
-# sloopDX's and OberVave's workflows.
+# fm-1-impressionism: build and release packages whenever test.yml passes on main.
+# Generates version tags as 0.0.1-{unix_timestamp}-{commit_hash} to avoid versioning constraints.
 #
-# One workflow, two sequential jobs -- not two files chained by a cross-workflow dispatch (an earlier version
-# of this needed that only because a GITHUB_TOKEN-authored tag push doesn't trigger other workflows, GitHub's
-# anti-recursion rule; one workflow with `needs:` sidesteps that question entirely, nothing left to route
-# around). Two ways in:
-#   - test.yml passing on main (workflow_run): `version` runs tools/next_version.py against commits since the
-#     last tag and pushes a new one if there's a real bump (fix:/feat:/breaking -- docs/chore/ci/etc. alone
-#     release nothing, and `firmware` then doesn't run either).
-#   - a human pushing a vX.Y.Z tag directly: `version` just passes that tag through unchanged.
-# CLAUDE.md documents the full pipeline and the single-digit-per-version-component constraint this relies on.
+# The JieLi toolchain comes from pkgman.jieliapp.com (tools/get_toolchain.sh), the AC79 SDK from gitee.com.
+# One workflow, two sequential jobs with `needs:` (GitHub's anti-recursion rule: GITHUB_TOKEN-authored tag
+# pushes don't trigger other workflows, but `needs:` sidesteps that by running them in the same workflow).
 name: release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_run:
     workflows: ["test"]
     types: [completed]
@@ -28,28 +17,23 @@ permissions:
 
 jobs:
   version:
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0 # tools/next_version.py needs the full tag/commit history, not a shallow clone
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - id: resolve
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            out="$(python3 tools/next_version.py)"
-            echo "$out"
-            # the one unambiguous line to key off; see tools/next_version.py for why
-            echo "tag=$(echo "$out" | sed -n 's/^TAGGED=//p')" >> "$GITHUB_OUTPUT"
-          fi
+          tag="$(python3 tools/version_timestamp.py)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$tag"
+          git push origin "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   firmware:
     needs: version
@@ -99,7 +83,8 @@ jobs:
         env:
           TAG: ${{ needs.version.outputs.tag }}
         run: |
-          V="${TAG#v}"
+          # Extract version from tag format: 0.0.1-{timestamp}-{hash}
+          V="$(echo "$TAG" | cut -d- -f1-3)"
           BOARD=smk37 sh build.sh --release "$V"
           BOARD=smk37 MODEL=elite sh build.sh --release "$V"
           BOARD=smk37 MODEL=mke sh build.sh --release "$V"
