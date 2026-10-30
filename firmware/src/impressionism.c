@@ -151,7 +151,7 @@ static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshi
 static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
-static uint32_t paused = 0u;                     /* pause/resume toggle (BTN_PLAY): 1 = paused, 0 = generating */
+static volatile uint32_t paused = 0u;           /* pause/resume toggle (BTN_PLAY): 1 = paused, 0 = generating */
 
 static void retune_voices(uint32_t scale)
 {
