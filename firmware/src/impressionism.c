@@ -3,41 +3,54 @@
  * to build your own on. Everything below this file (platform.c) is done: updates, the USB rescue, MIDI (USB, the
  * TRS jack), USB audio, keys, knobs, LEDs, the screen, flash storage; the FM-1 and the SMK-37.
  *
- * STATUS: this is still Dinghy's own stock demo below (a 4-voice sine on the keys), unmodified — the scaffold step
- * only renamed/rebranded the build (identity, store, screen name/colour). The actual generative-ambient engine
- * (whole-tone/pentatonic drift, a drone voice, no clocked sequencer — see CLAUDE.md's "Mission") replaces this
- * next; nothing below should be read as the project's real sound yet.
+ * STATUS: v1 of the real engine (ROADMAP.md), replacing Dinghy's stock sine demo. A generative ambient instrument,
+ * not a played one (CLAUDE.md's "Mission") -- the 27-key keyboard and MIDI in/out are intentionally unused here;
+ * nothing listens to them. Four voices, fixed roles:
  *
- *   keys       play sines, 4 voices; the notes go out over USB-MIDI too, on the MIDI channel
- *   OCT- OCT+  the octave (kept in flash)
- *   PRESETS    the MIDI channel: OMNI (in: all, out: 1) or 1..16 (kept in flash)
- *   MASTER     the volume (platform.c)
- *   MIDI in    notes from USB or the TRS jack play the sines, with their velocity; a MIDI clock shows its tempo
- *              and blinks PLAY on the beat, START / STOP light it
- *   SMK-37     the keys with velocity, the outer keys too, the pads (white keys F3..G5, lit while they sound), the
- *              pitch wheel bends +-2 semitones
+ *   voice 0   the drone: a sustained root/pedal tone. Re-roots itself on its own slow, independent timer.
+ *   voice 1-3 the chord's three colour tones above that root, from a template (maj7 or add9, ROADMAP.md),
+ *             re-planed (a new template + a scale-degree transposition) on its own faster timer
+ *
+ * Panel (ROADMAP.md's agreed mapping):
+ *   ENC_SELECT     scale: whole-tone / pentatonic (toggles on any turn)
+ *   ENC_ALGORITHM  density: how often the chord re-planes (0 sparsest .. 3 densest)
+ *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
+ *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
+ *   BTN_ARP        drone on/off
+ *   MASTER         volume (platform.c; nothing to do here)
+ * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
+ * re-randomizes fresh each boot -- only the knob settings are meant to survive, ROADMAP.md).
+ *
+ * The screen for now is plain status text (current scale, the four settings) -- ROADMAP.md's reactive
+ * impressionist pixel-art lily pond is a separate, later slice, not yet built.
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
  * What platform.c offers: docs/API.md. The chip's rules: docs/RULES.md. */
 #define APP_NAME "IMPRESSIONISM"                /* the rescue and the crash screen say this (docs/MAKE-IT-YOURS.md) */
-static void app_idle(void);
-#define LCD_IDLE app_idle                       /* while the screen's DMA runs: MIDI in (platform.c) */
+static void app_idle(void) {}                   /* nothing to do while the screen's DMA runs: no MIDI in, in v1 */
+#define LCD_IDLE app_idle
 #include "platform.c"
-#if BOARD_SMK37
-#include "smk_wheel.h"
-#endif
+#include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
-#define NV 4u                                   /* voices */
+#define NV 4u                                   /* 0 = drone, 1..3 = the chord's colour tones */
 static struct {
-    volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 (unbent) */
-    volatile int32_t gate;                      /* target level, Q15: 0 = released */
+    volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 */
+    volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
     int32_t amp;                                /* the level now: glides to gate, no clicks */
-    uint32_t ph, age;
-    uint8_t note;
+    uint32_t ph;
 } voice[NV];
-static volatile uint32_t bend_q16 = 65536;      /* the pitch wheel: the steps times this / 65536 */
+#define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
+
+/* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
+   block at 256 frames/44.1 kHz -- sized for a few seconds each (soft-focus, CLAUDE.md's Mission), tune by ear
+   once this is heard on real hardware */
+#define ATTACK_STEP 19                          /* ~2.4 s, 0 -> GATE_FULL */
+#define RELEASE_STEP 12                         /* ~3.9 s, GATE_FULL -> 0 */
+
+static volatile int32_t filter_k = 16384;        /* ENC_KNOB2: 1024 (dark) .. 32768 (fully open) */
+static int32_t lp_l, lp_r;                       /* the one-pole filter's own state (audio ISR only) */
 
 static int32_t sine(uint32_t ph)                /* a full cycle over 2^32 -> -32767..32767 (a refined parabola, ~0.1 %) */
 {
@@ -52,258 +65,179 @@ static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t v, i;
     for (v = 0; v < NV; v++) {
-        uint32_t ph = voice[v].ph, step = (uint32_t)(((uint64_t)voice[v].inc * bend_q16) >> 16);   /* (int64 multiply: fine) */
+        uint32_t ph = voice[v].ph, step = voice[v].inc;
         int32_t amp = voice[v].amp, g = voice[v].gate;
-        if (!amp && !g)
-            continue;                           /* silent: costs nothing */
+        if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }        /* once per block, not per sample */
+        else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
+        voice[v].amp = amp;
+        if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
         for (i = 0; i < n; i++) {
-            int32_t s;
-            if (amp < g) { amp += 48; if (amp > g) amp = g; }        /* attack ~5 ms */
-            else if (amp > g) { amp -= 6; if (amp < g) amp = g; }    /* release ~45 ms */
+            int32_t s = (sine(ph) * amp) >> 15;
             ph += step;
-            s = (sine(ph) * amp) >> 15;
             out[2u * i] += s;                   /* L */
             out[2u * i + 1u] += s;              /* R */
         }
         voice[v].ph = ph;
-        voice[v].amp = amp;
+    }
+    /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula */
+    for (i = 0; i < n; i++) {
+        lp_l += (out[2u * i] - lp_l) * filter_k >> 15;
+        lp_r += (out[2u * i + 1u] - lp_r) * filter_k >> 15;
+        out[2u * i] = lp_l;
+        out[2u * i + 1u] = lp_r;
     }
 }
 
-/* ---- notes (main loop) */
+/* ---- the generative engine (main loop): plans the next chord/root and sets the voices' inc/gate */
 static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9); lower octaves shift right */
     815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
     1153098554u, 1221665363u, 1294309365u, 1371273005u, 1452813141u, 1539201906u};
-static uint32_t ages, last_note = 255;
+#define ROOT_BASE_NOTE 48u                      /* C3-ish: a sensible register for a drone, tune by ear later */
+#define DEGREE_MIN (-12)
+#define DEGREE_MAX 12                            /* keeps the random walk in a musical register, not runaway */
 
-static void play(uint32_t note, uint32_t vel)
+static uint32_t note_to_inc(int32_t note)
 {
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
-    if (note > 127u || !vel) return;
-    for (v = 0; v < NV; v++) {                  /* the same note, else a free voice, else the oldest */
-        uint32_t score = voice[v].note == note && voice[v].gate ? 0u
-                       : voice[v].gate ? 0x80000000u + voice[v].age : (uint32_t)voice[v].amp + 1u;
-        if (score < best) { best = score; pick = v; }
-    }
-    voice[pick].note = (uint8_t)note;
-    voice[pick].age = ++ages;
-    voice[pick].inc = INC_C9[note % 12u] >> (10u - note / 12u);
-    voice[pick].gate = (int32_t)(vel * 90u);    /* 127 -> 11430: four voices stay under full scale */
-    last_note = note;
+    if (note < 0) note = 0;
+    if (note > 120) note = 120;                 /* the table's reach (INC_C9 >> 10..0) */
+    return INC_C9[(uint32_t)note % 12u] >> (10u - (uint32_t)note / 12u);
 }
-static void stop(uint32_t note)
+static int32_t clamp_degree(int32_t d) { return d < DEGREE_MIN ? DEGREE_MIN : d > DEGREE_MAX ? DEGREE_MAX : d; }
+
+static uint32_t rng_state = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
+static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
+static uint32_t chord_templ;
+static uint32_t next_plane_ms, next_root_ms;
+
+static void retune_voices(uint32_t scale)
+{
+    int32_t root_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree);
+    int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
+    uint32_t v;
+    voice[0].inc = note_to_inc(root_note);
+    for (v = 1; v < NV; v++)
+        voice[v].inc = note_to_inc(chord_note + chord_voice_semitone(chord_templ, v - 1u));
+}
+
+/* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
+static void replane(uint32_t scale, uint32_t density, uint32_t drift)
+{
+    plan_t p = plan_next(scale, plane_degree, drift, &rng_state);
+    plane_degree = clamp_degree(p.degree);
+    chord_templ = p.templ;
+    retune_voices(scale);
+    next_plane_ms = fm1_ms + next_trigger_ticks(density, &rng_state);
+}
+
+/* voice 0: re-roots on its own slower, independent timer (not density -- ROADMAP.md says density is "how often
+   the 3 voices retrigger", the drone is deliberately not on that clock), using the same drift_rate for its step
+   size and resetting the chord back onto the new root when it moves (flagged design choice, see ROADMAP.md) */
+static void reroot(uint32_t scale, uint32_t drift)
+{
+    plan_t p = plan_next(scale, home_degree, drift, &rng_state);
+    home_degree = clamp_degree(p.degree);
+    plane_degree = 0;
+    retune_voices(scale);
+    next_root_ms = fm1_ms + 60000u + rng_next(&rng_state) % 120001u;   /* 60-180 s: much slower than any plane rate */
+}
+
+/* ---- settings (what survives a power-off, ROADMAP.md) */
+static struct { uint8_t scale, density, drift, color, drone_on; } set = { SCALE_PENTATONIC, 1, 1, 16, 1 };
+
+static int32_t color_to_filter_k(uint32_t color) { return 1024 + (int32_t)color * 1024; }   /* 0..31 -> 1024..32768 */
+
+static int quiet(void)
 {
     uint32_t v;
     for (v = 0; v < NV; v++)
-        if (voice[v].note == note)
-            voice[v].gate = 0;
-}
-static int quiet(void)                          /* nothing sounds, not even a release */
-{
-    uint32_t v;
-    for (v = 0; v < NV; v++)
-        if (voice[v].gate || voice[v].amp) return 0;
+        if (voice[v].amp) return 0;
     return 1;
 }
 
-/* ---- the screen: the name, the last note big, the keyboard with what sounds, the octave */
-#define C_ACC RGB(180, 140, 255)                /* lilac, as the logo */
-#define C_KEY RGB(210, 210, 210)
+/* ---- the screen: plain status text for now (ROADMAP.md's pixel-art lily pond is a later slice) */
+#define C_ACC RGB(180, 140, 255)
 #define C_OFF RGB(90, 90, 90)
-#define KEY0 53u                                /* key 0 = F3 */
-static int black(uint32_t note) { return (0x54Au >> (note % 12u)) & 1u; }
+static const char *const SCALE_NAME[SCALE_COUNT] = {"WHOLE-TONE", "PENTATONIC"};
 
-static void draw_note(void)
+static void draw_screen(void)
 {
-    static const char *const NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    char s[8] = "-";
-    if (last_note < 128u) {
-        const char *p = NAME[last_note % 12u];
-        uint32_t i = 0;
+    char s[32];
+    uint32_t i = 0;
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
+    draw_text_box(0, 52, 240, &FONT_S, "v" APP_VER "  (pixel art: not yet built)", C_OFF, 1);
+    draw_text_box(0, 100, 240, &FONT_L, SCALE_NAME[set.scale], C_WHITE, 1);
+    {
+        const char *p = set.drone_on ? "DRONE ON " : "DRONE OFF";
         while (*p) s[i++] = *p++;
-        if (last_note >= 12u) s[i++] = (char)('0' + last_note / 12u - 1u);
+        s[i++] = ' '; s[i++] = ' ';
+        s[i++] = 'D'; s[i++] = (char)('0' + set.density);   /* density */
+        s[i++] = ' '; s[i++] = ' ';
+        s[i++] = 'R'; s[i++] = (char)('0' + set.drift);     /* drift rate */
         s[i] = 0;
     }
-    draw_text_box(0, 82, 240, &FONT_L, s, C_WHITE, 1);
-}
-
-static void draw_keys(uint32_t lit)             /* bit k: key k sounds */
-{
-    uint32_t k, w = 0;
-    cv_begin(240, 56, C_BLACK);
-    for (k = 0; k < 27u; k++)                   /* 16 white keys of 14 px from x = 8 */
-        if (!black(KEY0 + k)) {
-            cv_rect(8 + (int32_t)w * 14, 0, 13, 56, lit >> k & 1u ? C_ACC : C_KEY);
-            w++;
-        }
-    for (k = 0, w = 0; k < 27u; k++)            /* the black ones on the line between two white */
-        if (black(KEY0 + k))
-            cv_rect(8 + (int32_t)w * 14 - 5, 0, 9, 34, lit >> k & 1u ? C_ACC : C_BLACK);
-        else
-            w++;
-    cv_blit(0, 140);
-}
-
-static void draw_status(int32_t oct, uint32_t ch)
-{
-    char s[24] = "OCT +0  MIDI OMNI";
-    s[4] = oct < 0 ? '-' : '+';
-    s[5] = (char)('0' + (oct < 0 ? -oct : oct));
-    if (ch) {
-        s[13] = 'C'; s[14] = 'H'; s[15] = (char)(ch < 10u ? ' ' : '1'); s[16] = (char)('0' + ch % 10u);
-    }
-    draw_text_box(0, 212, 240, &FONT_S, s, C_OFF, 1);
-}
-
-static void draw_midi(uint32_t src, uint32_t bpm, uint32_t running)   /* where notes came from last, the clock */
-{
-    char s[32] = "", *p = s;
-    const char *a = src == 2u ? "TRS IN" : src == 1u ? "USB IN" : "";
-    while (*a) *p++ = *a++;
-    if (bpm) {
-        if (p != s) { *p++ = ' '; *p++ = ' '; }
-        a = running ? "CLOCK " : "clock ";
-        while (*a) *p++ = *a++;
-        if (bpm >= 100u) *p++ = (char)('0' + bpm / 100u);
-        *p++ = (char)('0' + bpm / 10u % 10u);
-        *p++ = (char)('0' + bpm % 10u);
-        a = " BPM";
-        while (*a) *p++ = *a++;
-    }
-    *p = 0;
-    draw_text_box(0, 120, 240, &FONT_S, s, C_OFF, 1);
-}
-
-/* ---- MIDI in: from the main loop, and from app_idle while the screen draws (idle_ok) */
-static struct { uint8_t oct, ch; } set = {0, 0};   /* what survives a power-off (add yours, up to SECTOR_MAX bytes) */
-static uint32_t idle_ok, midi_src, clk_n, clk_t0, clk_bpm, clk_run, clk_beat_ms;
-
-static void midi_in(void)
-{
-    uint8_t st, d1, d2;
-    int src;
-    while ((src = midi_get(&st, &d1, &d2)) != 0) {   /* 1 USB, 2 the TRS jack */
-        uint32_t ty = st & 0xF0u;
-        if (st == 0xF8u) {                      /* clock: 24 a quarter note */
-            if (clk_n % 24u == 0u) {
-                if (clk_n) {
-                    uint32_t ms = fm1_ms - clk_t0;   /* a quarter's length */
-                    clk_bpm = ms ? (60000u + ms / 2u) / ms : 0;
-                }
-                clk_t0 = fm1_ms;
-                clk_beat_ms = fm1_ms;
-            }
-            clk_n++;
-            continue;
-        }
-        if (st == 0xFAu) { clk_run = 1; clk_n = 0; continue; }   /* START: the next clock is beat 1 */
-        if (st == 0xFBu) { clk_run = 1; continue; }              /* CONTINUE */
-        if (st == 0xFCu) { clk_run = 0; continue; }              /* STOP */
-        if (set.ch && (st & 15u) != set.ch - 1u) continue;      /* not our channel */
-        if (ty == 0x90u && d2) { play(d1, d2); midi_src = (uint32_t)src; }
-        else if (ty == 0x80u || ty == 0x90u) stop(d1);
-    }
-}
-static void app_idle(void)
-{
-    if (idle_ok) midi_in();
+    draw_text_box(0, 150, 240, &FONT_S, s, C_OFF, 1);
 }
 
 static void app_main(void)
 {
-    uint32_t prev = 0, k, t_change = 0, dirty = 0, lit_drawn = ~0u, note_drawn = ~0u, status_drawn = ~0u;
-    uint32_t midi_drawn = ~0u;
-    uint8_t held[27] = {0};                     /* the note each key plays */
-#if BOARD_SMK37
-    static const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* white key -> key */
-    uint8_t pad_note[16] = {0}, ext_note[FM1_NKEY] = {0};
-    smk_pw_t wheel = {0};
-    smk_pad_events = 1;                         /* the pads as events (smk_pad_take): they play here, lit while they sound */
-#endif
-    if (settings_load(&set, sizeof set) || (int8_t)set.oct < -2 || (int8_t)set.oct > 2 || set.ch > 16u)
-        set.oct = 0, set.ch = 0;
+    uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, b, rel, st;
+    int32_t e;
 
-    lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
-    draw_text_box(0, 52, 240, &FONT_S, "a sine to build on  v" APP_VER, C_OFF, 1);
+    if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
+        set.color > 31u || set.drone_on > 1u)
+        set.scale = SCALE_PENTATONIC, set.density = 1, set.drift = 1, set.color = 16, set.drone_on = 1;
+    filter_k = color_to_filter_k(set.color);
+    reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
+    replane(set.scale, set.density, set.drift);
+    draw_screen();
+    scale_drawn = set.scale;
+    state_drawn = set.density | set.drift << 2 | set.drone_on << 4;
 
     for (;;) {
-        uint32_t keys, down, up, rel, b, lit = 0, out_ch = set.ch ? set.ch - 1u : 0u, st;
-        int32_t oct = (int8_t)set.oct, e;
-        uint32_t base = (uint32_t)((int32_t)KEY0 + 12 * oct);
         platform_poll();
 
-        keys = fm1_in.notes;                    /* bit k: key k (0 = F3 .. 26 = G5) */
-        down = keys & ~prev;
-        up = prev & ~keys;
-        prev = keys;
-        for (k = 0; k < 27u; k++) {                 /* (a key stops the note it started: the octave may change meanwhile) */
-#if BOARD_SMK37
-            uint32_t vel = fm1_in.key_vel[SMK_KEY_F3 + k];   /* the SMK's keys feel the velocity */
-#else
-            uint32_t vel = 100;
-#endif
-            if (down >> k & 1u) { held[k] = (uint8_t)(base + k); play(held[k], vel); midi_send(0x90u | out_ch, held[k], vel); }
-            if (up >> k & 1u) { stop(held[k]); midi_send(0x80u | out_ch, held[k], 0); }
+        if ((e = fm1_enc_take(ENC_SELECT)) != 0) { set.scale ^= 1u; dirty = 1; t_change = fm1_ms; }
+        if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {
+            int32_t d = (int32_t)set.density + e;
+            set.density = (uint8_t)(d < 0 ? 0 : d > 3 ? 3 : d);
+            dirty = 1; t_change = fm1_ms;
         }
-#if BOARD_SMK37
-        while ((e = smk_extkey_take()) >= 0) {  /* the keys left and right of the FM-1's 27: key << 8 | velocity */
-            uint32_t key = (uint32_t)e >> 8, vel = (uint32_t)e & 0x7Fu;
-            if (key >= FM1_NKEY) continue;
-            if (vel) { ext_note[key] = (uint8_t)(base + key - SMK_KEY_F3); play(ext_note[key], vel); midi_send(0x90u | out_ch, ext_note[key], vel); }
-            else if (ext_note[key]) { stop(ext_note[key]); midi_send(0x80u | out_ch, ext_note[key], 0); ext_note[key] = 0; }
+        if ((e = fm1_enc_take(ENC_KNOB1)) != 0) {
+            int32_t d = (int32_t)set.drift + e;
+            set.drift = (uint8_t)(d < 0 ? 0 : d > 3 ? 3 : d);
+            dirty = 1; t_change = fm1_ms;
         }
-        while ((e = smk_pad_take()) >= 0) {     /* a pad: hardware pad << 8 | velocity (0 = let go) */
-            uint32_t pad = ((uint32_t)e >> 8) & 15u, vel = (uint32_t)e & 0x7Fu;
-            uint32_t w = pad < 8u ? pad + 8u : pad - 8u;   /* bottom row = white keys 1-8, top row 9-16 */
-            if (vel) { pad_note[pad] = (uint8_t)(base + WHITE[w]); play(pad_note[pad], vel); midi_send(0x90u | out_ch, pad_note[pad], vel); }
-            else if (pad_note[pad]) { stop(pad_note[pad]); midi_send(0x80u | out_ch, pad_note[pad], 0); pad_note[pad] = 0; }
+        if ((e = fm1_enc_take(ENC_KNOB2)) != 0) {
+            int32_t c = (int32_t)set.color + e;
+            set.color = (uint8_t)(c < 0 ? 0 : c > 31 ? 31 : c);
+            filter_k = color_to_filter_k(set.color);
+            dirty = 1; t_change = fm1_ms;
         }
+        b = fm1_input_edges(&rel);
+        if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
+        fm1_led_key(BTN_ARP, set.drone_on);
+
+        if (scale_drawn != set.scale) {          /* the scale changed: re-root and re-plane right away, since a
+                                                     degree means a different interval in a different scale */
+            home_degree = 0; plane_degree = 0;
+            reroot(set.scale, set.drift);
+            replane(set.scale, set.density, set.drift);
+            scale_drawn = set.scale;
+        }
+        if ((int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
+        if ((int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
+        voice[0].gate = set.drone_on ? GATE_FULL : 0;
         {
-            int32_t bd = smk_pw_bend(&wheel, fm1_in.wheel[0], fm1_ms);   /* 1/4096 semitone */
-            bend_q16 = (uint32_t)(65536 + (bd * 3785 >> 12) + (((bd * bd) >> 12) * 109 >> 12));   /* ~2^(s/12) */
-        }
-#endif
-
-        b = fm1_input_edges(&rel);              /* buttons pressed since the last call (bit = button id) */
-        if (b & (1u << BTN_OCT_DOWN) && oct > -2) { set.oct = (uint8_t)(oct - 1); dirty = 1; t_change = fm1_ms; }
-        if (b & (1u << BTN_OCT_UP) && oct < 2) { set.oct = (uint8_t)(oct + 1); dirty = 1; t_change = fm1_ms; }
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* detents turned since the last call */
-            int32_t c = (int32_t)set.ch + e;
-            set.ch = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
-            dirty = 1;
-            t_change = fm1_ms;
+            uint32_t v;
+            for (v = 1; v < NV; v++) voice[v].gate = GATE_FULL;
         }
 
-        midi_in();
-        if (clk_bpm && fm1_ms - clk_t0 > 2000u) clk_bpm = 0, clk_run = 0;   /* the clock has stopped coming */
+        if ((st = set.density | set.drift << 2 | set.drone_on << 4) != state_drawn) { state_drawn = st; draw_screen(); }
 
-        oct = (int8_t)set.oct;
-        base = (uint32_t)((int32_t)KEY0 + 12 * oct);
-        for (k = 0; k < NV; k++)                /* what sounds, on the keys of this octave */
-            if (voice[k].gate && voice[k].note >= base && voice[k].note < base + 27u)
-                lit |= 1u << (voice[k].note - base);
-        for (k = 0; k < 27u; k++)
-            fm1_led_key(KEY_LED(k), lit >> k & 1u);
-        fm1_led_key(BTN_OCT_DOWN, oct < 0);
-        fm1_led_key(BTN_OCT_UP, oct > 0);
-        fm1_led_key(BTN_PLAY, clk_run || (clk_bpm && fm1_ms - clk_beat_ms < 80u));   /* lit: running; a blink a beat */
-#if BOARD_SMK37
-        for (k = 0; k < 16u; k++) {             /* a pad glows lilac while its key sounds */
-            uint32_t w = k < 8u ? k + 8u : k - 8u, on = lit >> WHITE[w] & 1u;
-            padled_set(k, on ? 90 : 4, on ? 60 : 2, on ? 128 : 8);
-        }
-        padled_flush();                         /* (sends only what changed) */
-#endif
-
-        idle_ok = 1;                            /* the drawing below may read MIDI meanwhile (LCD_IDLE) */
-        if (lit != lit_drawn) { lit_drawn = lit; draw_keys(lit); }   /* redraw only what changed */
-        if (last_note != note_drawn) { note_drawn = last_note; draw_note(); }
-        if ((st = (uint32_t)(oct + 2) | (uint32_t)set.ch << 4) != status_drawn) { status_drawn = st; draw_status(oct, set.ch); }
-        if ((st = midi_src | clk_bpm << 2 | clk_run << 12) != midi_drawn) { midi_drawn = st; draw_midi(midi_src, clk_bpm, clk_run); }
-        idle_ok = 0;
-
-        if (dirty && quiet() && fm1_ms - t_change > 2000u) {   /* 2 s after the change, when silent (an erase stalls the sound) */
+        /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md), but this is an
+           ambient instrument that may rarely go fully silent -- don't wait forever for one */
+        if (dirty && (quiet() || fm1_ms - t_change > 30000u) && fm1_ms - t_change > 2000u) {
             settings_save(&set, sizeof set);
             dirty = 0;
         }

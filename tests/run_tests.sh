@@ -20,13 +20,19 @@ run() { echo "== $1"; shift; "$@" || fail=1; }
 
 run "FM-1 app on the host: the default script plays, screens and sound" sh tests/run_host.sh
 run "SMK-37 app on the host: the default script" env BOARD=smk37 sh tests/run_host.sh
-run "FM-1 MIDI: USB, the TRS jack, a clock, the channel" sh tests/run_host.sh tests/scripts/midi.txt
-run "SMK-37: velocity, a pad, an outer key, the pitch wheel" env BOARD=smk37 sh tests/run_host.sh tests/scripts/smk37.txt
+# midi.txt / smk37.txt drive keys, MIDI and the pitch wheel -- all intentionally unused by the v1 generative
+# engine (ROADMAP.md: no performance input in v1). They still pass (tests/host.c only fails on file I/O errors,
+# not on what the inputs did), just don't exercise anything app-specific any more; kept for the platform-level
+# USB/TRS/clock/wheel coverage underneath, not for impressionism.c's own behaviour.
+run "FM-1 MIDI: USB, the TRS jack, a clock, the channel (platform-level only, v1 ignores all of it)" sh tests/run_host.sh tests/scripts/midi.txt
+run "SMK-37: velocity, a pad, an outer key, the pitch wheel (platform-level only, v1 ignores all of it)" env BOARD=smk37 sh tests/run_host.sh tests/scripts/smk37.txt
 
 $CC -DBOARD_SMK37=1 -Ifirmware/hal -o "$OUT/smk_flash_test" tests/smk_flash_test.c
 run "SMK-37 flash map: settings, blobs, owner tag, slots in the store; never the head, BTIF/USRTRIM, USR, key_mac" "$OUT/smk_flash_test"
 $CC -o "$OUT/smk_wheel_test" tests/smk_wheel_test.c
 run "SMK-37 pitch wheel: the bend is back to 0 at rest, however slowly the wheel was moved" "$OUT/smk_wheel_test"
+$CC -o "$OUT/planing_test" tests/planing_test.c
+run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc
