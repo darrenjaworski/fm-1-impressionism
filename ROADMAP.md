@@ -90,6 +90,48 @@ Everything in the mission not covered above, added incrementally once v1 is prov
 - Any reverb/delay-style space effect (dry oscillators + envelope + the one color filter only, so far).
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
+## Noted for later (not yet scoped or implemented) — 2026-10-30
+
+Three items from the user, captured here rather than acted on immediately (none of these are built yet):
+
+**A dreamier default character.** Reference: [a modular-synth performance of Debussy's "Arabesque No. 1"](https://youtu.be/b7wRcIRPYuQ)
+on Mutable Instruments Rings, Plaits, Clouds, and a Squarp Hermod sequencer — on-theme (Debussy) and directly
+researched (not just a title guess): Rings is a resonant physical-modeling voice (bell/string-like sustain),
+Plaits a macro-oscillator, **Clouds a granular texture/diffusion processor** (almost certainly where most of the
+"dreamy" quality in that reference comes from), Hermod the sequencer driving it. The ask is for the engine's
+**default** character to lean this way, not just a reachable extreme. Translating that to this hardware (no DSP
+coprocessor, integer-only, a hard ≤2.9 ms/5.8 ms ISR budget already partly spent on the existing one-pole
+filter, docs/RULES.md):
+
+- The biggest lever is probably a cheap diffusion/space effect — this repo's "Out of scope" list above already
+  named this as unbuilt; this request raises its priority. A full granular engine (what Clouds actually does)
+  isn't realistic here, but a classic cheap diffuser (a handful of short delay taps summed, "poor man's reverb")
+  is plausibly within budget and worth prototyping first.
+- A richer, more overtone-rich voice (a couple of stacked/detuned partials per voice instead of one bare sine)
+  would read as more "resonant" (Rings-like) than the current plain sine, at a real but likely affordable CPU cost.
+- The mission already calls for slow, sustained movement (multi-second envelopes); this suggests leaning further
+  that way as the actual _default_ density/drift position, not just an available setting at one extreme.
+
+Not decided: the diffuser's exact DSP design against the real ISR budget; whether "dreamier" becomes the new
+default outright or a new reachable position on existing knobs.
+
+**Backlit buttons.** Already fully supported by the platform, just unused: the FM-1 has 14 discrete buttons
+(`BTN_OCT_DOWN`/`UP`, `FX`, `SEL`, `ENV`, `LFO`, `EDIT`, `GLO`, `HOME`, `SAVE`, `ARP`, `SEQ`, `PLAY`, `REC`,
+docs/API.md), each independently lightable via `fm1_led_key(id, on)` (full) or `fm1_led_key_glow(id, on)` (a dim
+"there's something here" glow, ~1/24 brightness) — no new hardware capability needed. Right now only `BTN_ARP`
+is lit (drone on/off); the other 13 sit dark. Reading the ask as wanting a soft ambient backlight across the
+currently-dark buttons (`fm1_led_key_glow` fits the "soft-focus" aesthetic better than full brightness) — as
+visual polish, separate from the open question of whether those buttons also gain new functions (see `BTN_PLAY`
+below for one that now does).
+
+**`BTN_PLAY` pauses/resumes the generative scheduler.** Currently unused in this engine (the stock demo's only
+use of it was lighting/blinking with an incoming MIDI clock, which v1 deliberately ignores — see CLAUDE.md's
+Mission). The ask: pressing it should toggle a pause, freezing generation. Open design question, not yet
+decided: does "paused" mean the current chord keeps sustaining indefinitely (a freeze, closer to pausing video —
+probably the more natural read of "pause" for an ambient instrument) or does it mute the voices too? Either way,
+pausing should stop `next_plane_ms`/`next_root_ms` from firing, not just silence the output. `BTN_PLAY`'s own
+LED is the natural place to show the state (lit while generating, per the existing `BTN_ARP` convention).
+
 ## An online playable version on this repo's GitHub Pages — done (2026-10-30)
 
 Goal: a browser-playable emulator hosted at this repo's own GitHub Pages, like
