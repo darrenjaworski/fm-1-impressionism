@@ -17,13 +17,15 @@
  *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
  *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
  *   BTN_ARP        drone on/off
+ *   BTN_PLAY       pause/resume generation (the current chord keeps sustaining; timers resume where they stopped)
+ *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
  * re-randomizes fresh each boot -- only the knob settings are meant to survive, ROADMAP.md).
  *
- * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): colour temperature from ENC_KNOB2,
- * lily blooms coloured by the current chord template, water shimmer speed from drift rate, how many pads look
- * "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
+ * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
+ * lily blooms coloured by the current chord template (and rippling with the water), water shimmer speed from
+ * drift rate, how many pads look "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
  * (the scale name, drone state, D/R).
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
@@ -46,7 +48,7 @@ static struct {
     volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
     int32_t amp;                                /* the level now: glides to gate, no clicks */
     uint32_t ph;
-    uint32_t ph_detune;                         /* detuned partial (~5% up) for richness */
+    uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
 } voice[NV];
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 
@@ -73,7 +75,7 @@ static void app_audio(int32_t *out, uint32_t n)
     uint32_t v, i;
     for (v = 0; v < NV; v++) {
         uint32_t ph = voice[v].ph, step = voice[v].inc;
-        uint32_t ph_d = voice[v].ph_detune, step_d = step + (step / 20u);  /* 105/100 = 1 + 1/20 (~5% detune) */
+        uint32_t ph_d = voice[v].ph_detune, step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
         int32_t amp = voice[v].amp, g = voice[v].gate;
         if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }        /* once per block, not per sample */
         else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
@@ -154,7 +156,11 @@ static void reroot(uint32_t scale, uint32_t drift)
 }
 
 /* ---- settings (what survives a power-off, ROADMAP.md) */
-static struct { uint8_t scale, density, drift, color, drone_on; } set = { SCALE_PENTATONIC, 0, 0, 12, 1 };  /* dreamier: sparse, slow, darker */
+static struct { uint8_t scale, density, drift, color, drone_on; } set;
+static void set_defaults(void)                  /* dreamier: sparse, slow, darker. Field-wise: no struct copy, so no memcpy call */
+{
+    set.scale = SCALE_PENTATONIC; set.density = 0; set.drift = 0; set.color = 12; set.drone_on = 1;
+}
 
 static int32_t color_to_filter_k(uint32_t color) { return 1024 + (int32_t)color * 1024; }   /* 0..31 -> 1024..32768 */
 
@@ -193,19 +199,10 @@ static void draw_pond(void)
             uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */
             rgb_t c;
             if (cell_kind(x, y) == CELL_PAD) {
-                if (pad_i < active_n) {
-                    /* active bloom: ripple with the water's shimmer */
-                    c.r = (uint8_t)((uint32_t)bloom.r * (80u + shimmer * 5u) / 115u);
-                    c.g = (uint8_t)((uint32_t)bloom.g * (80u + shimmer * 5u) / 115u);
-                    c.b = (uint8_t)((uint32_t)bloom.b * (80u + shimmer * 5u) / 115u);
-                } else {
-                    c = pad_leaf_rgb(x, y);   /* Monet's two leaf greens, scene.h */
-                }
+                c = pad_i < active_n ? shimmer_rgb(bloom, shimmer) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
                 pad_i++;
             } else {
-                c.r = (uint8_t)((uint32_t)water.r * (80u + shimmer * 5u) / 115u);
-                c.g = (uint8_t)((uint32_t)water.g * (80u + shimmer * 5u) / 115u);
-                c.b = (uint8_t)((uint32_t)water.b * (80u + shimmer * 5u) / 115u);
+                c = shimmer_rgb(water, shimmer);
             }
             cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
                     RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
@@ -245,11 +242,11 @@ static void draw_status(void)                   /* only on a real settings/chord
 static void app_main(void)
 {
     uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
-    int32_t e;
+    int32_t e, left_plane = 0, left_root = 0;
 
     if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
         set.color > 31u || set.drone_on > 1u)
-        set.scale = SCALE_PENTATONIC, set.density = 1, set.drift = 1, set.color = 16, set.drone_on = 1;
+        set_defaults();
     filter_k = color_to_filter_k(set.color);
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
@@ -262,20 +259,12 @@ static void app_main(void)
                   set.scale << 11u;
     next_draw_ms = fm1_ms + 300u;                 /* the pond's shimmer redraws on its own slow tick too */
 
-    /* backlit buttons: soft ambient glow on all unused buttons; BTN_ARP and BTN_PLAY get full brightness for state */
-    fm1_led_key_glow(BTN_OCT_DOWN, 1);
-    fm1_led_key_glow(BTN_OCT_UP, 1);
-    fm1_led_key_glow(BTN_FX, 1);
-    fm1_led_key_glow(BTN_SEL, 1);
-    fm1_led_key_glow(BTN_ENV, 1);
-    fm1_led_key_glow(BTN_LFO, 1);
-    fm1_led_key_glow(BTN_EDIT, 1);
-    fm1_led_key_glow(BTN_GLO, 1);
-    fm1_led_key_glow(BTN_HOME, 1);
-    fm1_led_key_glow(BTN_SAVE, 1);
-    fm1_led_key_glow(BTN_SEQ, 1);
-    fm1_led_key_glow(BTN_REC, 1);
-    /* BTN_PLAY is not glowed: it needs full brightness state control for pause/resume feedback */
+    {   /* backlight every button (the FM-1's 14 are ids 0..13; a no-op on the SMK-37). The glow is its own dim layer
+           and an LED takes the brightest layer (hal/fm1_input.h), so BTN_ARP/BTN_PLAY's lit state still reads
+           clearly on top of it, and "off" is the dim glow rather than dark. */
+        uint32_t id;
+        for (id = 0; id < 14u; id++) fm1_led_key_glow(id, 1);
+    }
 
     for (;;) {
         platform_poll();
@@ -300,8 +289,17 @@ static void app_main(void)
         b = fm1_input_edges(&rel);
         if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
         fm1_led_key(BTN_ARP, set.drone_on);
-        if (b & (1u << BTN_PLAY)) { paused ^= 1u; }  /* pause/resume: freezes generation, sustains current chord */
-        fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, off while paused */
+        if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation, the current chord sustains */
+            paused ^= 1u;
+            if (paused) {                            /* remember how long each timer had left, so resuming doesn't */
+                left_plane = (int32_t)(next_plane_ms - fm1_ms);   /* fire both overdue timers at once */
+                left_root = (int32_t)(next_root_ms - fm1_ms);
+            } else {
+                next_plane_ms = fm1_ms + (uint32_t)(left_plane > 0 ? left_plane : 0);
+                next_root_ms = fm1_ms + (uint32_t)(left_root > 0 ? left_root : 0);
+            }
+        }
+        fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, the dim glow while paused */
 
         if (scale_drawn != set.scale) {          /* the scale changed: re-root and re-plane right away, since a
                                                      degree means a different interval in a different scale */

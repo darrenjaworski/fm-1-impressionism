@@ -87,6 +87,17 @@ static uint32_t ripple_step(uint32_t drift_rate)
     return STEP[drift_rate];
 }
 
+/* a travelling shimmer on a colour: shimmer 0..7 scales it from 80/115 to 115/115 of its brightness (water and
+   active blooms both ripple with this, so the purple moves with the pond) */
+static rgb_t shimmer_rgb(rgb_t c, uint32_t shimmer)
+{
+    uint32_t k = 80u + shimmer * 5u;
+    c.r = (uint8_t)((uint32_t)c.r * k / 115u);
+    c.g = (uint8_t)((uint32_t)c.g * k / 115u);
+    c.b = (uint8_t)((uint32_t)c.b * k / 115u);
+    return c;
+}
+
 /* ---- the pond's fixed layout: a deterministic hashed pattern, generated once (the composition), not
    re-randomised per frame (the reactive parts above are what change) ------------------------------------------ */
 #define POND_W 24u   /* 240 px / 10 px cells */

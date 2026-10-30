@@ -78,6 +78,15 @@ int main(void)
         check(pads * 10u >= total && pads * 3u <= total, "pads are a plausible fraction of the pond (10%-33%)");
     }
 
+    /* Seam J: the shared shimmer (water and active blooms both use it). Never brighter than the source colour,
+       never black, and brightest at the top of its 0..7 range. */
+    {
+        rgb_t bloom = chord_templ_to_bloom_rgb(0), lo = shimmer_rgb(bloom, 0), hi = shimmer_rgb(bloom, 7);
+        check(hi.r == bloom.r && hi.g == bloom.g && hi.b == bloom.b, "shimmer 7 leaves the colour at full brightness");
+        check(lo.r < hi.r && lo.g < hi.g && lo.b < hi.b, "shimmer 0 is dimmer than shimmer 7 on every channel");
+        check(lo.r > 0 && lo.g > 0 && lo.b > 0, "the lowest shimmer never goes black");
+    }
+
     printf("scene: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }
