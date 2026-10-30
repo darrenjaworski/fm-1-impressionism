@@ -34,13 +34,18 @@ This is a **generative ambient** instrument, not a played-note synth: the goal i
 
 ### Release pipeline (fully automated — no manual tagging)
 
-Three workflows chain together on every push to `main`:
+Two workflows:
 
-1. **`.github/workflows/test.yml`** — builds all board variants with the real JieLi toolchain and runs the full test suite. Must pass before anything below runs.
-2. **`.github/workflows/tag-release.yml`** — triggers on `test.yml` completing successfully (`workflow_run`, not a parallel `push` trigger: a release should never land on an untested commit). Runs `tools/next_version.py`, which finds the last `vX.Y.Z` tag, scans commits since then, and applies the standard Conventional Commits bump rule: `fix:` → patch, `feat:` → minor, a `!` after the type or a `BREAKING CHANGE` footer → major, anything else (`docs:`, `chore:`, `ci:`, `refactor:`, ...) → **no release** (quietly exits 0; this is normal, not a failure). If a bump would need a two-digit component, it fails loudly instead (exit 1) — that needs a human decision, not an auto-tag. On a real bump, it pushes the new annotated tag, then explicitly runs `gh workflow run release.yml --ref <tag>` — a plain tag push made with the default `GITHUB_TOKEN` does **not** trigger other workflows (GitHub's deliberate anti-recursion rule), so this dispatch is the correct way to chain to step 3, not a workaround for something broken.
-3. **`.github/workflows/release.yml`** — unchanged from before: builds the real `--release` packages, runs the host tests again, attests build provenance, and publishes the GitHub Release with the `.fwsc` files. Its `github.ref_type == 'tag'`-gated steps fire the same way whether reached by an actual tag push or (as above) a `workflow_dispatch` run against that tag's ref.
+1. **`.github/workflows/test.yml`** — builds all board variants with the real JieLi toolchain and runs the full test suite, on every push and PR. Must pass before anything below runs.
+2. **`.github/workflows/release.yml`** — triggers on `test.yml` completing successfully on `main` (`workflow_run`, not a parallel `push` trigger: a release should never land on an untested commit), or on a human pushing a `vX.Y.Z` tag directly. Two jobs:
+   - **`version`** — for the `workflow_run` path, runs `tools/next_version.py`, which finds the last `vX.Y.Z` tag, scans commits since then, and applies the standard Conventional Commits bump rule: `fix:` → patch, `feat:` → minor, a `!` after the type or a `BREAKING CHANGE` footer → major, anything else (`docs:`, `chore:`, `ci:`, `refactor:`, ...) → **no release** (empty tag output; `firmware` below then doesn't run, which is normal, not a failure). If a bump would need a two-digit component, it fails loudly instead (exit 1) — that needs a human decision, not an auto-tag. For a direct tag push, it just passes that tag straight through.
+   - **`firmware`** (`needs: version`, only runs if a tag exists) — builds the real `--release` packages, runs the host tests again, attests build provenance, and publishes the GitHub Release with the `.fwsc` files, at the tag `version` resolved.
+
+   One workflow, not two chained by a cross-workflow dispatch: an earlier version of this needed that only because a plain tag push made with the default `GITHUB_TOKEN` doesn't trigger other workflows (GitHub's deliberate anti-recursion rule) — `needs:` between two jobs in the same workflow sidesteps that question entirely, nothing left to route around.
 
 Net effect: merge a `feat:`/`fix:`/breaking commit to `main`, let CI pass, and a real tagged release with built packages appears with no further action. A `docs:`/`chore:`/`ci:`-only push releases nothing, by design.
+
+**Caution learned the hard way**: `tools/next_version.py`'s own unit tests (`tests/next_version_test.py`) exist because two real bugs shipped bad tags on this pipeline's first real runs (a naive `BREAKING CHANGE` substring match firing on this script's own commit message explaining the rule, and an order-dependent bump comparison that let a newer `fix:` commit block an older `feat:` from ever being seen) — before changing `bump_for()` again, extend those tests first, the same mistake is easy to repeat in a new shape.
 
 ## Repo layout (scaffolded from Dinghy)
 

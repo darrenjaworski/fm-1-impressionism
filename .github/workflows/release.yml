@@ -1,24 +1,68 @@
-# fm-1-impressionism (forked from zvenson/dinghy): build the packages on GitHub, run the host tests, and on a tag
-# vX.Y publish the release with a build attestation (actions/attest-build-provenance): the Firmware Hub shows
-# "Built from source" for exactly these files. The JieLi toolchain comes from pkgman.jieliapp.com
-# (tools/get_toolchain.sh), the AC79 SDK from gitee.com, as in sloopDX's and OberVave's workflows. Run by hand
-# (workflow_dispatch) for a test build without a release.
+# fm-1-impressionism (forked from zvenson/dinghy): compute the next release tag (if any) from Conventional
+# Commits, then build the packages on GitHub and publish the release with a build attestation
+# (actions/attest-build-provenance) -- the Firmware Hub shows "Built from source" for exactly these files. The
+# JieLi toolchain comes from pkgman.jieliapp.com (tools/get_toolchain.sh), the AC79 SDK from gitee.com, as in
+# sloopDX's and OberVave's workflows.
+#
+# One workflow, two sequential jobs -- not two files chained by a cross-workflow dispatch (an earlier version
+# of this needed that only because a GITHUB_TOKEN-authored tag push doesn't trigger other workflows, GitHub's
+# anti-recursion rule; one workflow with `needs:` sidesteps that question entirely, nothing left to route
+# around). Two ways in:
+#   - test.yml passing on main (workflow_run): `version` runs tools/next_version.py against commits since the
+#     last tag and pushes a new one if there's a real bump (fix:/feat:/breaking -- docs/chore/ci/etc. alone
+#     release nothing, and `firmware` then doesn't run either).
+#   - a human pushing a vX.Y.Z tag directly: `version` just passes that tag through unchanged.
+# CLAUDE.md documents the full pipeline and the single-digit-per-version-component constraint this relies on.
 name: release
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
+  version:
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # tools/next_version.py needs the full tag/commit history, not a shallow clone
+
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            out="$(python3 tools/next_version.py)"
+            echo "$out"
+            # the one unambiguous line to key off; see tools/next_version.py for why
+            echo "tag=$(echo "$out" | sed -n 's/^TAGGED=//p')" >> "$GITHUB_OUTPUT"
+          fi
+
   firmware:
+    needs: version
+    if: needs.version.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
-      contents: write # the release on a tag
+      contents: write # the release
       id-token: write # the attestation's signing identity
       attestations: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - uses: actions/setup-python@v7
         with:
@@ -50,10 +94,11 @@ jobs:
       - name: Host tests
         run: sh tests/run_tests.sh
 
-      - name: Release packages (tags only)
-        if: github.ref_type == 'tag'
+      - name: Release packages
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${TAG#v}"
           BOARD=smk37 sh build.sh --release "$V"
           BOARD=smk37 MODEL=elite sh build.sh --release "$V"
           BOARD=smk37 MODEL=mke sh build.sh --release "$V"
@@ -67,16 +112,15 @@ jobs:
           path: build/impressionism*.fwsc
           if-no-files-found: error
 
-      - name: Attest the packages (tags only)
-        if: github.ref_type == 'tag'
+      - name: Attest the packages
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/impressionism-*.fwsc
 
-      - name: Release (tags only)
-        if: github.ref_type == 'tag'
+      - name: Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           files: |
             build/impressionism-*.fwsc
             build/SHA256SUMS
