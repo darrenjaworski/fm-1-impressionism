@@ -18,9 +18,9 @@ jobs:
       id-token: write # the attestation's signing identity
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
 
@@ -61,7 +61,7 @@ jobs:
           ls -l build/impressionism-"$V"*.fwsc
           (cd build && sha256sum impressionism-"$V"*.fwsc > SHA256SUMS)
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: impressionism-fwsc
           path: build/impressionism*.fwsc
@@ -69,13 +69,13 @@ jobs:
 
       - name: Attest the packages (tags only)
         if: github.ref_type == 'tag'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/impressionism-*.fwsc
 
       - name: Release (tags only)
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             build/impressionism-*.fwsc

@@ -24,7 +24,7 @@ jobs:
       contents: write # to create and push the tag
       actions: write # to dispatch release.yml at it
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0 # tools/next_version.py needs the full tag/commit history, not a shallow clone
