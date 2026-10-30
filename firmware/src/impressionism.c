@@ -360,6 +360,10 @@ static void app_main(void)
             uint32_t v;
             for (v = 1; v < NV; v++) voice[v].gate = paused ? 0 : GATE_FULL;
         }
+        if (paused) {                               /* pause: instant silence (zero amp), not a 9s fade */
+            uint32_t v;
+            for (v = 0; v < NV; v++) voice[v].amp = 0;
+        }
 
         st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
              set.scale << 11u;
