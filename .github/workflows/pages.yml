@@ -1,13 +1,18 @@
-# fm-1-impressionism: deploy site/ to GitHub Pages (repo setting: build from GitHub Actions, not a branch).
-# Step 1 (this file): a hello-world static page, to prove the deploy pipeline itself works end to end before
-# anything emulator-related gets vendored in (ROADMAP.md's "an online playable version"). The actual emulator
-# site replaces site/'s content later; this workflow's shape (configure-pages/upload-pages-artifact/deploy-pages)
-# shouldn't need to change when that happens.
+# fm-1-impressionism: deploy a playable in-browser emulator to GitHub Pages (repo setting: build from GitHub
+# Actions). Follows joakimeriksson/fm1-emu's own build process (its web/build.sh, called by tools/build_site.sh
+# in its own CI) rather than inventing one: a generic FM-1 CPU emulator (Rust -> WebAssembly) that runs any
+# unmodified .fwsc, not something built from this project's own source (ROADMAP.md explains why: this repo is
+# forked from Dinghy, which has no web/Emscripten target of its own, unlike fm1-amb's felucca-bsp base).
+#
+# site/ holds only this project's OWN customization (firmwares.json, pointed at this repo's own hosted .fwsc).
+# The emulator itself is built fresh from source every run, never committed to this repo's git history -- same
+# reasoning as not vendoring the JieLi SDK: a third party's build artifacts belong fetched at build time, not
+# checked in. Pinned to a specific commit for reproducibility; bump FM1_EMU_REF deliberately to pick up
+# upstream changes, not by drifting. GPL-3.0, same as this project; credited in LICENSING.md.
 #
 # Triggers: a direct change to this page's own files (site/**, or this workflow); and a published release
-# (release.yml), so the emulator's copy of the firmware stays on the latest build once that part exists --
-# ROADMAP.md's plan fetches it from "the latest release" at build time, so a new release is a real reason to
-# redeploy even when nothing in site/ itself changed.
+# (release.yml), so the emulator's copy of the firmware stays on the latest build even when nothing in site/
+# itself changed.
 name: pages
 
 on:
@@ -27,6 +32,9 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  FM1_EMU_REF: 93cb7ee3f7008b27959ba73073b864e37efd7289 # joakimeriksson/fm1-emu@master, pinned 2026-10-30
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -35,12 +43,38 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: impressionism
+
+      - uses: actions/checkout@v7
+        with:
+          repository: joakimeriksson/fm1-emu
+          ref: ${{ env.FM1_EMU_REF }}
+          path: fm1-emu
+
+      - run: rustup target add wasm32-unknown-unknown
+
+      - name: Build the emulator (fm1-emu's own web/build.sh)
+        run: fm1-emu/web/build.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Fetch this project's latest .fwsc (the FM-1 build, not an SMK-37 variant)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p fetched
+          gh release download --repo "${{ github.repository }}" --pattern 'impressionism-*.fwsc' -D fetched --clobber
+          fw=$(ls fetched/impressionism-*.fwsc | grep -v smk37 | head -1)
+          test -n "$fw"
+          cp "$fw" dist/impressionism.fwsc # a stable name: firmwares.json's URL doesn't change release to release
+
+      - name: Point the catalog at this project's own firmware
+        run: cp impressionism/site/firmwares.json dist/firmwares.json
 
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: dist
 
       - id: deployment
         uses: actions/deploy-pages@v5

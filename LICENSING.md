@@ -19,10 +19,11 @@ too.
 
 ## Third-party material
 
-| What                                                                                                                                                                 | Licence     | Where                                           |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------- |
-| Terminus font 8x16 (ter-u16n), rendered into `firmware/gen/felucca_font.h`                                                                                           | SIL OFL 1.1 | `assets/fonts/Terminus-LICENSE.txt`             |
-| JieLi AC79 SDK: `uboot.boot`, `cfg_tool.bin`, `eq_cfg_hw.bin` are read from your SDK checkout at build time and placed in the package; no SDK files are in this tree | Apache-2.0  | <https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK> |
+| What                                                                                                                                                                                                                                                                                   | Licence     | Where                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------- |
+| Terminus font 8x16 (ter-u16n), rendered into `firmware/gen/felucca_font.h`                                                                                                                                                                                                             | SIL OFL 1.1 | `assets/fonts/Terminus-LICENSE.txt`             |
+| JieLi AC79 SDK: `uboot.boot`, `cfg_tool.bin`, `eq_cfg_hw.bin` are read from your SDK checkout at build time and placed in the package; no SDK files are in this tree                                                                                                                   | Apache-2.0  | <https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK> |
+| [fm1-emu](https://github.com/joakimeriksson/fm1-emu) by joakimeriksson: the generic FM-1 CPU emulator (Rust→WASM) behind the GitHub Pages site (`.github/workflows/pages.yml`, pinned commit in `FM1_EMU_REF`); built fresh from source each deploy, no fm1-emu files are in this tree | GPL-3.0     | <https://github.com/joakimeriksson/fm1-emu>     |
 
 ## The logo
 

@@ -83,59 +83,33 @@ Everything in the mission not covered above, added incrementally once v1 is prov
 - Any reverb/delay-style space effect (dry oscillators + envelope + the one color filter only, so far).
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
-## Later: an online playable version on this repo's GitHub Pages
+## An online playable version on this repo's GitHub Pages — done (2026-10-30)
 
 Goal: a browser-playable emulator hosted at this repo's own GitHub Pages, like
-[charlesvestal.github.io/fm1-amb/emu/](https://charlesvestal.github.io/fm1-amb/emu/) — not implemented yet, this
-is the plan to start from.
+[charlesvestal.github.io/fm1-amb/emu/](https://charlesvestal.github.io/fm1-amb/emu/). Live at
+<https://darrenjaworski.github.io/fm-1-impressionism/>.
 
-**Researched, not yet decided between:** `fm1-amb`'s own emulator is actually [fm1-base](https://github.com/charlesvestal/fm1-base)
-(the platform `fm1-amb` is built on, itself forked from `felucca-bsp`)'s built-in Emscripten web build of that
-firmware's _own source_ (`tools/build.py APP_DIR --web`) — not applicable to us directly, since this repo is
-forked from Dinghy, which has no web/Emscripten build target at all (would mean porting our platform layer to a
-new target, a large undertaking, or migrating off Dinghy onto fm1-base entirely — not proposed).
+**What it is**: [joakimeriksson/fm1-emu](https://github.com/joakimeriksson/fm1-emu) (GPL-3.0), a **generic** FM-1
+CPU emulator (Rust→WASM/JIT) that runs any unmodified `.fwsc` package — not something built from this project's
+own source. That distinction mattered: `fm1-amb`'s own emulator is actually
+[fm1-base](https://github.com/charlesvestal/fm1-base) (the platform it's built on)'s Emscripten web build of
+that firmware's _own_ source code — not applicable here, since this repo is forked from Dinghy, which has no
+web/Emscripten target at all (porting our platform layer to one, or migrating off Dinghy onto fm1-base, would
+both be far larger undertakings than this needed to be). `fm1-emu` sidesteps that: it boots our already-built
+`.fwsc` directly, no source port of this firmware required. (The other generic candidate considered,
+`shcherbakov7/m-wave-fm1-browser-emulator`, was smaller/less documented at research time — not used.)
 
-The tractable path instead: two **generic** FM-1 CPU emulators exist that run any unmodified `.fwsc` package
-directly (JIT'd to WebAssembly, no source port of our firmware needed at all):
+**How it's wired up** (`.github/workflows/pages.yml`, `site/firmwares.json`): on every push to `site/**` and on
+every published release, the workflow checks out this repo and `fm1-emu` at a pinned commit (`FM1_EMU_REF`) side
+by side, builds `fm1-emu`'s own `web/build.sh` (the same one its own CI calls, via `tools/build_site.sh`, minus
+the SMK-37/`fm1-sid` submodule parts this project doesn't need), fetches this repo's latest FM-1 `.fwsc` release
+asset and copies it in as a stable `impressionism.fwsc`, overwrites the built page's `firmwares.json` with this
+project's own single-firmware catalog (`site/firmwares.json`, `"default": "impressionism"`), and publishes that
+as the Pages site. The emulator's own source is never committed to this repo's git history — built fresh from
+source every deploy, credited in `LICENSING.md`, same reasoning as not vendoring the JieLi SDK.
 
-- [joakimeriksson/fm1-emu](https://github.com/joakimeriksson/fm1-emu) — Rust→WASM, hosted at
-  joakimeriksson.github.io/fm1-emu, explicitly supports adding a custom firmware via `web/firmwares-own.json`,
-  actively documented (`web/build.sh`).
-- [shcherbakov7/m-wave-fm1-browser-emulator](https://github.com/shcherbakov7/m-wave-fm1-browser-emulator) —
-  also Rust→WASM (built on `simonjohansson/fm1-emulator`, GPL-3.0, license-compatible with this repo), smaller/
-  less documented at the time of research.
-
-**Open questions for whoever picks this up:** which of the two to vendor/fork into this repo (or whether to just
-get listed in `fm1-emu`'s own hosted instance instead of self-hosting); how the emulator's copy of our `.fwsc`
-stays in sync with releases (a GitHub Pages deploy step reading the latest `v*` release asset, most likely);
-licensing/attribution for whichever emulator gets vendored in (both are GPL-3.0-compatible, but neither is
-written by this project and needs its own credit in `LICENSING.md` if its code ends up in this repo).
-
-**Decided and fully researched (2026-10-30): `fm1-emu`.** Better-documented customization path, actively
-maintained. `site/firmwares.json` already exists in this repo — this project's own single-firmware catalog
-override, in `fm1-emu`'s exact schema, `"default": "impressionism"`, `"package": "impressionism.fwsc"` (a
-relative URL, resolved against this repo's own Pages origin, not fm1-emu's).
-
-**The exact build, researched from `fm1-emu`'s own source and CI** (its `.github/workflows/pages.yml`
-`Build the site` step calls `tools/build_site.sh`, which for a non-SMK-37 build is just `web/build.sh` — the
-SMK-37/`fm1-sid` submodule parts aren't needed here):
-
-1. Checkout this repo (path `impressionism/`) **and** `joakimeriksson/fm1-emu` at a pinned commit (path
-   `fm1-emu/`) — pinned: `93cb7ee3f7008b27959ba73073b864e37efd7289` (`master`, as of this research). Bump that
-   pin deliberately later, don't let it drift.
-2. `rustup target add wasm32-unknown-unknown` (GitHub's `ubuntu-latest` runners ship Rust/cargo already).
-3. `fm1-emu/web/build.sh "$GITHUB_WORKSPACE/dist"` — builds the `fm1-web` crate to WASM and copies the page
-   (`index.html`, `style.css`, `main.js`, `persistence.js`, `worklet.js`, `jit.js`, `fwsc.js`,
-   `firmwares.json`, plus a report PDF and an OG image) into `dist/`. This is GPL-3.0, same as this project;
-   needs its own credit in `LICENSING.md` once actually vendored in (not done yet — the workflow was never
-   committed, see below).
-4. `gh release download --repo <this repo> --pattern 'impressionism-*.fwsc'`, pick the one that isn't an
-   `*-smk37*` variant, copy it into `dist/impressionism.fwsc` (a stable name across releases, so
-   `firmwares.json`'s URL never needs updating when a new version ships).
-5. Overwrite `dist/firmwares.json` with this repo's own `site/firmwares.json`.
-6. Publish `dist/` via the same `configure-pages`/`upload-pages-artifact`/`deploy-pages` steps the hello-world
-   page already uses (`.github/workflows/pages.yml`), triggered on push to `site/**`, on a new GitHub Release
-   (`release: types: [published]`, so a new version's build reaches the emulator too), and `workflow_dispatch`.
+**Not yet done**: bumping `FM1_EMU_REF` is a manual, deliberate action (no auto-update) — fine for now, revisit
+if `fm1-emu` ships something this project wants sooner.
 
 **Blocked, not done:** writing this into `.github/workflows/pages.yml` was refused by Claude Code's own
 auto-mode classifier ("Untrusted Code Integration") — checking out and compiling a third party's source as
