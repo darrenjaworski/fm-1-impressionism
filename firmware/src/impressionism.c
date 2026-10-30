@@ -104,7 +104,7 @@ static uint32_t note_to_inc(int32_t note)
 }
 static int32_t clamp_degree(int32_t d) { return d < DEGREE_MIN ? DEGREE_MIN : d > DEGREE_MAX ? DEGREE_MAX : d; }
 
-static uint32_t rng_state = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
+static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
 static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
@@ -122,11 +122,11 @@ static void retune_voices(uint32_t scale)
 /* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
 static void replane(uint32_t scale, uint32_t density, uint32_t drift)
 {
-    plan_t p = plan_next(scale, plane_degree, drift, &rng_state);
+    plan_t p = plan_next(scale, plane_degree, drift, &engine_rng);
     plane_degree = clamp_degree(p.degree);
     chord_templ = p.templ;
     retune_voices(scale);
-    next_plane_ms = fm1_ms + next_trigger_ticks(density, &rng_state);
+    next_plane_ms = fm1_ms + next_trigger_ticks(density, &engine_rng);
 }
 
 /* voice 0: re-roots on its own slower, independent timer (not density -- ROADMAP.md says density is "how often
@@ -134,11 +134,11 @@ static void replane(uint32_t scale, uint32_t density, uint32_t drift)
    size and resetting the chord back onto the new root when it moves (flagged design choice, see ROADMAP.md) */
 static void reroot(uint32_t scale, uint32_t drift)
 {
-    plan_t p = plan_next(scale, home_degree, drift, &rng_state);
+    plan_t p = plan_next(scale, home_degree, drift, &engine_rng);
     home_degree = clamp_degree(p.degree);
     plane_degree = 0;
     retune_voices(scale);
-    next_root_ms = fm1_ms + 60000u + rng_next(&rng_state) % 120001u;   /* 60-180 s: much slower than any plane rate */
+    next_root_ms = fm1_ms + 60000u + rng_next(&engine_rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
 }
 
 /* ---- settings (what survives a power-off, ROADMAP.md) */
