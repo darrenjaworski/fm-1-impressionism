@@ -54,7 +54,9 @@ firmware/src/impressionism.c  # application layer — the instrument itself (aud
 firmware/src/platform.c       # infra: boot, USB, MIDI, update loader, audio ISR — don't touch casually
 firmware/src/store.h          # per-board flash storage layout (settings/blobs/slots); STORE_MAGIC/DATA_FAMILY here
 firmware/hal/                 # hardware abstraction layer — the only place allowed to touch raw registers
-tools/                        # build.py (device build), fm1_install.py (USB installer), fm1pkg_make.py, lz4blk.py
+tools/                        # build.py (device build), fm1_install.py (USB installer), fm1pkg_make.py, lz4blk.py,
+                               # next_version.py (release versioning), dev_emulator.sh (local browser emulator)
+site/                         # this project's own GitHub Pages content (firmwares.json), see .github/workflows/pages.yml
 tests/run_host.sh             # host-mode test: compiles with the system cc, renders to WAV + screen PNGs
 tests/run_tests.sh            # full test suite; needs a completed ./build.sh first
 build.sh                      # device build entry point (wraps tools/build.py; needs the JieLi toolchain + SDK)
@@ -71,7 +73,11 @@ sh tests/run_host.sh                                                    # host-m
 sh tests/run_tests.sh                                                   # full suite; needs build/impressionism.fwsc first
 ./build.sh [--release X.Y] [--board fm1|smk37] [--model pro|elite|mke]  # device build -> build/impressionism.fwsc
 python3 tools/fm1_install.py build/impressionism.fwsc                   # install over USB (needs: pip install mido python-rtmidi)
+tools/dev_emulator.sh [port]                                            # serve build/impressionism.fwsc in a local
+                                                                         #   fm1-emu (needs Rust/rustup; ./build.sh first)
 ```
+
+`tools/dev_emulator.sh` is the fast edit/build/look loop for the engine and the screen without a real FM-1 or a CI round trip — the same `fm1-emu` build `.github/workflows/pages.yml` deploys (pinned to the same `FM1_EMU_REF`, keep the two in sync), pointed at your own local `./build.sh` output instead of the latest GitHub release. Clones `fm1-emu` into `.cache/` (gitignored), not committed here.
 
 ## Toolchain requirements
 
