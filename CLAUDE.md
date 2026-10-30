@@ -29,8 +29,18 @@ This is a **generative ambient** instrument, not a played-note synth: the goal i
 
 ## Conventions
 
-- Commit messages follow **[Conventional Commits](https://www.conventionalcommits.org/)** (`feat:`, `fix:`, `docs:`, `chore:`, etc.) — use this for every commit in this repo, not just releases.
-- Versioning follows **[SemVer](https://semver.org/)** (`MAJOR.MINOR.PATCH`). Note the Hub/CI release workflow above tags as `vX.Y` (two-part) — once this matters, prefer full `vMAJOR.MINOR.PATCH` tags and treat a breaking change to the audio engine, panel mapping, or storage layout as a MAJOR bump, new generative/engine features as MINOR, and fixes/tuning as PATCH.
+- Commit messages follow **[Conventional Commits](https://www.conventionalcommits.org/)** (`feat:`, `fix:`, `docs:`, `chore:`, etc.) — use this for every commit in this repo, not just releases. This isn't just style: `tools/next_version.py` parses commit subjects to decide whether (and how) to release, see below.
+- Versioning follows **[SemVer](https://semver.org/)** (`MAJOR.MINOR.PATCH`) — **but every component is a single digit (0-9), no exceptions**. That's not a style choice: the FM-1 identity (`FM-1_9XN`/`FM-1_95N`, see Identity below) encodes the version's last digit directly, and `tools/build.py --release X.Y.Z`'s own regex requires exactly one digit each. A version that would need a two-digit component can't be built with this scheme as-is.
+
+### Release pipeline (fully automated — no manual tagging)
+
+Three workflows chain together on every push to `main`:
+
+1. **`.github/workflows/test.yml`** — builds all board variants with the real JieLi toolchain and runs the full test suite. Must pass before anything below runs.
+2. **`.github/workflows/tag-release.yml`** — triggers on `test.yml` completing successfully (`workflow_run`, not a parallel `push` trigger: a release should never land on an untested commit). Runs `tools/next_version.py`, which finds the last `vX.Y.Z` tag, scans commits since then, and applies the standard Conventional Commits bump rule: `fix:` → patch, `feat:` → minor, a `!` after the type or a `BREAKING CHANGE` footer → major, anything else (`docs:`, `chore:`, `ci:`, `refactor:`, ...) → **no release** (quietly exits 0; this is normal, not a failure). If a bump would need a two-digit component, it fails loudly instead (exit 1) — that needs a human decision, not an auto-tag. On a real bump, it pushes the new annotated tag, then explicitly runs `gh workflow run release.yml --ref <tag>` — a plain tag push made with the default `GITHUB_TOKEN` does **not** trigger other workflows (GitHub's deliberate anti-recursion rule), so this dispatch is the correct way to chain to step 3, not a workaround for something broken.
+3. **`.github/workflows/release.yml`** — unchanged from before: builds the real `--release` packages, runs the host tests again, attests build provenance, and publishes the GitHub Release with the `.fwsc` files. Its `github.ref_type == 'tag'`-gated steps fire the same way whether reached by an actual tag push or (as above) a `workflow_dispatch` run against that tag's ref.
+
+Net effect: merge a `feat:`/`fix:`/breaking commit to `main`, let CI pass, and a real tagged release with built packages appears with no further action. A `docs:`/`chore:`/`ci:`-only push releases nothing, by design.
 
 ## Repo layout (scaffolded from Dinghy)
 
