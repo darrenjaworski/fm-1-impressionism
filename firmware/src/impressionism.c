@@ -40,6 +40,11 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
+#include "diffuse.h"                            /* the cheap multi-tap diffuser (dreamier space) */
+
+#ifndef ISR_TIMING
+#define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
+#endif
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
 #define NV 4u                                   /* 0 = drone, 1..3 = the chord's colour tones */
@@ -58,6 +63,16 @@ static struct {
 #define ATTACK_STEP 8                           /* ~5.8 s, 0 -> GATE_FULL (slower fade-in) */
 #define RELEASE_STEP 5                          /* ~9.4 s, GATE_FULL -> 0 (slower fade-out) */
 
+#ifdef DINGHY_HOST
+static int16_t diff_buf[DIFF_LEN];              /* host build: plain memory (the .pool section is ELF-only, see gfx.c) */
+#else
+static int16_t diff_buf[DIFF_LEN] __attribute__((section(".pool")));
+#endif
+static uint32_t diff_pos;                       /* audio ISR only */
+#if ISR_TIMING && !defined(DINGHY_HOST)
+static volatile uint32_t isr_max_ticks;         /* worst app_audio time seen, in fm1_ticks() */
+#endif
+
 static volatile int32_t filter_k = 16384;        /* ENC_KNOB2: 1024 (dark) .. 32768 (fully open) */
 static int32_t lp_l, lp_r;                       /* the one-pole filter's own state (audio ISR only) */
 
@@ -73,6 +88,9 @@ static int32_t sine(uint32_t ph)                /* a full cycle over 2^32 -> -32
 static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t v, i;
+#if ISR_TIMING && !defined(DINGHY_HOST)
+    uint32_t t_start = fm1_ticks();
+#endif
     for (v = 0; v < NV; v++) {
         uint32_t ph = voice[v].ph, step = voice[v].inc;
         uint32_t ph_d = voice[v].ph_detune, step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
@@ -82,23 +100,35 @@ static void app_audio(int32_t *out, uint32_t n)
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
         for (i = 0; i < n; i++) {
-            int32_t s_main = sine(ph), s_det = sine(ph_d);
-            int32_t s = ((s_main + s_det) >> 1) * amp >> 15;  /* blend main + detuned, then apply amp */
+            int32_t s_main = (sine(ph) * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
             ph += step;
             ph_d += step_d;
-            out[2u * i] += s;                   /* L */
-            out[2u * i + 1u] += s;              /* R */
+            out[2u * i] += (3 * s_main + s_det) >> 2;         /* L leans on the main partial... */
+            out[2u * i + 1u] += (s_main + 3 * s_det) >> 2;    /* ...R on the detuned one: width from the chorus */
         }
         voice[v].ph = ph;
         voice[v].ph_detune = ph_d;
+    }
+    /* the space: a feed-forward multi-tap diffuser on the mono sum, returned into L and R (diffuse.h) */
+    for (i = 0; i < n; i++) {
+        int32_t wl, wr;
+        diffuse_step(diff_buf, &diff_pos, (out[2u * i] + out[2u * i + 1u]) >> 1, &wl, &wr);
+        out[2u * i] += wl;
+        out[2u * i + 1u] += wr;
     }
     /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula */
     for (i = 0; i < n; i++) {
         lp_l += (out[2u * i] - lp_l) * filter_k >> 15;
         lp_r += (out[2u * i + 1u] - lp_r) * filter_k >> 15;
-        out[2u * i] = lp_l;
-        out[2u * i + 1u] = lp_r;
+        out[2u * i] = lp_l > 32767 ? 32767 : lp_l < -32767 ? -32767 : lp_l;           /* dry + wet can pass full scale */
+        out[2u * i + 1u] = lp_r > 32767 ? 32767 : lp_r < -32767 ? -32767 : lp_r;
     }
+#if ISR_TIMING && !defined(DINGHY_HOST)
+    {
+        uint32_t dt = (uint32_t)(fm1_ticks() - t_start);
+        if (dt > isr_max_ticks) isr_max_ticks = dt;
+    }
+#endif
 }
 
 /* ---- the generative engine (main loop): plans the next chord/root and sets the voices' inc/gate */
@@ -239,6 +269,21 @@ static void draw_status(void)                   /* only on a real settings/chord
     draw_text_box(0, POND_Y + POND_H * 10u + 26u, 240, &FONT_S, s, C_OFF, 1);
 }
 
+#if ISR_TIMING && !defined(DINGHY_HOST)
+static void draw_isr_time(void)                 /* worst app_audio block so far, in tenths of a ms (budget: 5.8 ms, aim < 2.9) */
+{
+    char s[16];
+    uint32_t t = isr_max_ticks / (100u * FM1_TICKS_PER_US), i = 0;   /* ticks -> 0.1 ms */
+    s[i++] = 'I'; s[i++] = 'S'; s[i++] = 'R'; s[i++] = ' ';
+    if (t >= 100u) s[i++] = (char)('0' + t / 100u % 10u);
+    s[i++] = (char)('0' + t / 10u % 10u); s[i++] = '.'; s[i++] = (char)('0' + t % 10u);
+    s[i++] = ' '; s[i++] = 'M'; s[i++] = 'S'; s[i] = 0;
+    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, s, C_OFF, 1);
+}
+#else
+static void draw_isr_time(void) {}
+#endif
+
 static void app_main(void)
 {
     uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
@@ -326,6 +371,7 @@ static void app_main(void)
         } else if ((int32_t)(fm1_ms - next_draw_ms) >= 0) {   /* just the pond's own slow shimmer tick --
                                                                    the title and status text never change here */
             draw_pond();
+            draw_isr_time();
             next_draw_ms = fm1_ms + 300u;
         }
 

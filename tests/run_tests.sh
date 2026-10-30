@@ -35,6 +35,8 @@ $CC -o "$OUT/planing_test" tests/planing_test.c
 run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
 $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
+$CC -o "$OUT/diffuse_test" tests/diffuse_test.c
+run "the cheap diffuser's pure logic: a feed-forward multi-tap delay" "$OUT/diffuse_test"
 run "the release pipeline's version bump (tools/next_version.py), incl. two real bugs it already caught once" python3 tests/next_version_test.py
 
 $CC -o "$OUT/ota_test" tests/ota_test.c

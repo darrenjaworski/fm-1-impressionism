@@ -87,7 +87,7 @@ Everything in the mission not covered above, added incrementally once v1 is prov
 
 ## Out of scope / not yet decided for any version
 
-- Any reverb/delay-style space effect (dry oscillators + envelope + the one color filter only, so far).
+- A reverb with feedback or a wet/dry knob. (A fixed feed-forward four-tap diffuser, `firmware/src/diffuse.h`, is built; its real ISR cost is still unmeasured on hardware: build with `-DISR_TIMING=1` to show the worst block time on screen, budget 2.9 ms.)
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
 ## Deferred items — done (2026-10-30 session 2)
