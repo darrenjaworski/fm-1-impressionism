@@ -46,14 +46,15 @@ static struct {
     volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
     int32_t amp;                                /* the level now: glides to gate, no clicks */
     uint32_t ph;
+    uint32_t ph_detune;                         /* detuned partial (~5% up) for richness */
 } voice[NV];
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 
 /* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
    block at 256 frames/44.1 kHz -- sized for a few seconds each (soft-focus, CLAUDE.md's Mission), tune by ear
-   once this is heard on real hardware */
-#define ATTACK_STEP 19                          /* ~2.4 s, 0 -> GATE_FULL */
-#define RELEASE_STEP 12                         /* ~3.9 s, GATE_FULL -> 0 */
+   once this is heard on real hardware. Reduced for dreamier character: slower, more sustain. */
+#define ATTACK_STEP 8                           /* ~5.8 s, 0 -> GATE_FULL (slower fade-in) */
+#define RELEASE_STEP 5                          /* ~9.4 s, GATE_FULL -> 0 (slower fade-out) */
 
 static volatile int32_t filter_k = 16384;        /* ENC_KNOB2: 1024 (dark) .. 32768 (fully open) */
 static int32_t lp_l, lp_r;                       /* the one-pole filter's own state (audio ISR only) */
@@ -72,18 +73,22 @@ static void app_audio(int32_t *out, uint32_t n)
     uint32_t v, i;
     for (v = 0; v < NV; v++) {
         uint32_t ph = voice[v].ph, step = voice[v].inc;
+        uint32_t ph_d = voice[v].ph_detune, step_d = step + (step / 20u);  /* 105/100 = 1 + 1/20 (~5% detune) */
         int32_t amp = voice[v].amp, g = voice[v].gate;
         if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }        /* once per block, not per sample */
         else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
         for (i = 0; i < n; i++) {
-            int32_t s = (sine(ph) * amp) >> 15;
+            int32_t s_main = sine(ph), s_det = sine(ph_d);
+            int32_t s = ((s_main + s_det) >> 1) * amp >> 15;  /* blend main + detuned, then apply amp */
             ph += step;
+            ph_d += step_d;
             out[2u * i] += s;                   /* L */
             out[2u * i + 1u] += s;              /* R */
         }
         voice[v].ph = ph;
+        voice[v].ph_detune = ph_d;
     }
     /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula */
     for (i = 0; i < n; i++) {
@@ -148,7 +153,7 @@ static void reroot(uint32_t scale, uint32_t drift)
 }
 
 /* ---- settings (what survives a power-off, ROADMAP.md) */
-static struct { uint8_t scale, density, drift, color, drone_on; } set = { SCALE_PENTATONIC, 1, 1, 16, 1 };
+static struct { uint8_t scale, density, drift, color, drone_on; } set = { SCALE_PENTATONIC, 0, 0, 12, 1 };  /* dreamier: sparse, slow, darker */
 
 static int32_t color_to_filter_k(uint32_t color) { return 1024 + (int32_t)color * 1024; }   /* 0..31 -> 1024..32768 */
 
