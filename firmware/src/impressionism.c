@@ -21,8 +21,10 @@
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
  * re-randomizes fresh each boot -- only the knob settings are meant to survive, ROADMAP.md).
  *
- * The screen for now is plain status text (current scale, the four settings) -- ROADMAP.md's reactive
- * impressionist pixel-art lily pond is a separate, later slice, not yet built.
+ * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): colour temperature from ENC_KNOB2,
+ * lily blooms coloured by the current chord template, water shimmer speed from drift rate, how many pads look
+ * "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
+ * (the scale name, drone state, D/R).
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
@@ -30,8 +32,12 @@
 #define APP_NAME "IMPRESSIONISM"                /* the rescue and the crash screen say this (docs/MAKE-IT-YOURS.md) */
 static void app_idle(void) {}                   /* nothing to do while the screen's DMA runs: no MIDI in, in v1 */
 #define LCD_IDLE app_idle
+#define CV_MAX (240u * 120u)                     /* platform.c's own default is 240x64; the pond's canvas needs
+                                                     the full 120 px it's drawn at (scene.h's POND_H). Costs
+                                                     ~57.6 KB of the 336 KB pool, comfortably within budget. */
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
+#include "scene.h"                              /* the reactive pixel-art lily pond */
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
 #define NV 4u                                   /* 0 = drone, 1..3 = the chord's colour tones */
@@ -154,10 +160,47 @@ static int quiet(void)
     return 1;
 }
 
-/* ---- the screen: plain status text for now (ROADMAP.md's pixel-art lily pond is a later slice) */
+/* ---- the screen: a reactive pixel-art lily pond (scene.h), plus a small status-text overlay below it */
 #define C_ACC RGB(180, 140, 255)
 #define C_OFF RGB(90, 90, 90)
 static const char *const SCALE_NAME[SCALE_COUNT] = {"WHOLE-TONE", "PENTATONIC"};
+#define POND_Y 58                               /* screen y where the pond's canvas strip gets blitted */
+static uint32_t pond_total_pads, ripple_phase;   /* the layout is fixed (scene.h); counted once, not per draw */
+
+static void init_pond(void)
+{
+    uint32_t x, y;
+    pond_total_pads = 0;
+    for (y = 0; y < POND_H; y++)
+        for (x = 0; x < POND_W; x++)
+            if (cell_kind(x, y) == CELL_PAD) pond_total_pads++;
+}
+
+static void draw_pond(void)
+{
+    uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
+    uint32_t dim = set.drone_on ? 100u : 65u;    /* drone off: a cooler, dimmer pond (ROADMAP.md) */
+    rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
+    rgb_t leaf = {40, 90, 55};                   /* a muted lily-pad green; not one of scene.h's reactive colours */
+    cv_begin(240, POND_H * 10u, C_BLACK);
+    for (y = 0; y < POND_H; y++)
+        for (x = 0; x < POND_W; x++) {
+            rgb_t c;
+            if (cell_kind(x, y) == CELL_PAD) {
+                c = pad_i < active_n ? bloom : leaf;
+                pad_i++;
+            } else {
+                uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */
+                c.r = (uint8_t)((uint32_t)water.r * (80u + shimmer * 5u) / 115u);
+                c.g = (uint8_t)((uint32_t)water.g * (80u + shimmer * 5u) / 115u);
+                c.b = (uint8_t)((uint32_t)water.b * (80u + shimmer * 5u) / 115u);
+            }
+            cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
+                    RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
+        }
+    cv_blit(0, POND_Y);
+    ripple_phase += ripple_step(set.drift);
+}
 
 static void draw_screen(void)
 {
@@ -165,8 +208,8 @@ static void draw_screen(void)
     uint32_t i = 0;
     lcd_fill(0, 0, 240, 240, C_BLACK);
     draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
-    draw_text_box(0, 52, 240, &FONT_S, "v" APP_VER "  (pixel art: not yet built)", C_OFF, 1);
-    draw_text_box(0, 100, 240, &FONT_L, SCALE_NAME[set.scale], C_WHITE, 1);
+    draw_pond();
+    draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, SCALE_NAME[set.scale], C_WHITE, 1);
     {
         const char *p = set.drone_on ? "DRONE ON " : "DRONE OFF";
         while (*p) s[i++] = *p++;
@@ -176,23 +219,26 @@ static void draw_screen(void)
         s[i++] = 'R'; s[i++] = (char)('0' + set.drift);     /* drift rate */
         s[i] = 0;
     }
-    draw_text_box(0, 150, 240, &FONT_S, s, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * 10u + 26u, 240, &FONT_S, s, C_OFF, 1);
 }
 
 static void app_main(void)
 {
-    uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, b, rel, st;
+    uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
     int32_t e;
 
     if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
         set.color > 31u || set.drone_on > 1u)
         set.scale = SCALE_PENTATONIC, set.density = 1, set.drift = 1, set.color = 16, set.drone_on = 1;
     filter_k = color_to_filter_k(set.color);
+    init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
     draw_screen();
     scale_drawn = set.scale;
-    state_drawn = set.density | set.drift << 2 | set.drone_on << 4;
+    state_drawn = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
+                  set.scale << 11u;
+    next_draw_ms = fm1_ms + 300u;                 /* the pond's shimmer redraws on its own slow tick too */
 
     for (;;) {
         platform_poll();
@@ -233,7 +279,14 @@ static void app_main(void)
             for (v = 1; v < NV; v++) voice[v].gate = GATE_FULL;
         }
 
-        if ((st = set.density | set.drift << 2 | set.drone_on << 4) != state_drawn) { state_drawn = st; draw_screen(); }
+        st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
+             set.scale << 11u;
+        if (st != state_drawn || (int32_t)(fm1_ms - next_draw_ms) >= 0) {   /* a settings change, or the pond's
+                                                                                own slow shimmer tick */
+            state_drawn = st;
+            draw_screen();
+            next_draw_ms = fm1_ms + 300u;
+        }
 
         /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md), but this is an
            ambient instrument that may rarely go fully silent -- don't wait forever for one */

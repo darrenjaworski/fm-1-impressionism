@@ -33,6 +33,8 @@ $CC -o "$OUT/smk_wheel_test" tests/smk_wheel_test.c
 run "SMK-37 pitch wheel: the bend is back to 0 at rest, however slowly the wheel was moved" "$OUT/smk_wheel_test"
 $CC -o "$OUT/planing_test" tests/planing_test.c
 run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
+$CC -o "$OUT/scene_test" tests/scene_test.c
+run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc

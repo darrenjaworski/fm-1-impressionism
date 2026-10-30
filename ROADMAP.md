@@ -82,3 +82,31 @@ Everything in the mission not covered above, added incrementally once v1 is prov
 
 - Any reverb/delay-style space effect (dry oscillators + envelope + the one color filter only, so far).
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
+
+## Later: an online playable version on this repo's GitHub Pages
+
+Goal: a browser-playable emulator hosted at this repo's own GitHub Pages, like
+[charlesvestal.github.io/fm1-amb/emu/](https://charlesvestal.github.io/fm1-amb/emu/) — not implemented yet, this
+is the plan to start from.
+
+**Researched, not yet decided between:** `fm1-amb`'s own emulator is actually [fm1-base](https://github.com/charlesvestal/fm1-base)
+(the platform `fm1-amb` is built on, itself forked from `felucca-bsp`)'s built-in Emscripten web build of that
+firmware's _own source_ (`tools/build.py APP_DIR --web`) — not applicable to us directly, since this repo is
+forked from Dinghy, which has no web/Emscripten build target at all (would mean porting our platform layer to a
+new target, a large undertaking, or migrating off Dinghy onto fm1-base entirely — not proposed).
+
+The tractable path instead: two **generic** FM-1 CPU emulators exist that run any unmodified `.fwsc` package
+directly (JIT'd to WebAssembly, no source port of our firmware needed at all):
+
+- [joakimeriksson/fm1-emu](https://github.com/joakimeriksson/fm1-emu) — Rust→WASM, hosted at
+  joakimeriksson.github.io/fm1-emu, explicitly supports adding a custom firmware via `web/firmwares-own.json`,
+  actively documented (`web/build.sh`).
+- [shcherbakov7/m-wave-fm1-browser-emulator](https://github.com/shcherbakov7/m-wave-fm1-browser-emulator) —
+  also Rust→WASM (built on `simonjohansson/fm1-emulator`, GPL-3.0, license-compatible with this repo), smaller/
+  less documented at the time of research.
+
+**Open questions for whoever picks this up:** which of the two to vendor/fork into this repo (or whether to just
+get listed in `fm1-emu`'s own hosted instance instead of self-hosting); how the emulator's copy of our `.fwsc`
+stays in sync with releases (a GitHub Pages deploy step reading the latest `v*` release asset, most likely);
+licensing/attribution for whichever emulator gets vendored in (both are GPL-3.0-compatible, but neither is
+written by this project and needs its own credit in `LICENSING.md` if its code ends up in this repo).
