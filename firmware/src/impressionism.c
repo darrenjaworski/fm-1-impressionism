@@ -184,12 +184,19 @@ static void draw_pond(void)
     cv_begin(240, POND_H * 10u, C_BLACK);
     for (y = 0; y < POND_H; y++)
         for (x = 0; x < POND_W; x++) {
+            uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */
             rgb_t c;
             if (cell_kind(x, y) == CELL_PAD) {
-                c = pad_i < active_n ? bloom : pad_leaf_rgb(x, y);   /* Monet's two leaf greens, scene.h */
+                if (pad_i < active_n) {
+                    /* active bloom: ripple with the water's shimmer */
+                    c.r = (uint8_t)((uint32_t)bloom.r * (80u + shimmer * 5u) / 115u);
+                    c.g = (uint8_t)((uint32_t)bloom.g * (80u + shimmer * 5u) / 115u);
+                    c.b = (uint8_t)((uint32_t)bloom.b * (80u + shimmer * 5u) / 115u);
+                } else {
+                    c = pad_leaf_rgb(x, y);   /* Monet's two leaf greens, scene.h */
+                }
                 pad_i++;
             } else {
-                uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */
                 c.r = (uint8_t)((uint32_t)water.r * (80u + shimmer * 5u) / 115u);
                 c.g = (uint8_t)((uint32_t)water.g * (80u + shimmer * 5u) / 115u);
                 c.b = (uint8_t)((uint32_t)water.b * (80u + shimmer * 5u) / 115u);
