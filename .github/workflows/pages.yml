@@ -3,12 +3,19 @@
 # anything emulator-related gets vendored in (ROADMAP.md's "an online playable version"). The actual emulator
 # site replaces site/'s content later; this workflow's shape (configure-pages/upload-pages-artifact/deploy-pages)
 # shouldn't need to change when that happens.
+#
+# Triggers: a direct change to this page's own files (site/**, or this workflow); and a published release
+# (release.yml), so the emulator's copy of the firmware stays on the latest build once that part exists --
+# ROADMAP.md's plan fetches it from "the latest release" at build time, so a new release is a real reason to
+# redeploy even when nothing in site/ itself changed.
 name: pages
 
 on:
   push:
     branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
