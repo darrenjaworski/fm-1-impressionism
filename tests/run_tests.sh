@@ -35,6 +35,7 @@ $CC -o "$OUT/planing_test" tests/planing_test.c
 run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
 $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
+run "the release pipeline's version bump (tools/next_version.py), incl. two real bugs it already caught once" python3 tests/next_version_test.py
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc

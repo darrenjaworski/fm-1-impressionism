@@ -45,10 +45,19 @@ CONVENTIONAL = re.compile(r"^(\w+)(\([^)]*\))?(!)?:\s*(.*)$")
 BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
 
 
+RANK = {"patch": 1, "minor": 2, "major": 3}
+
+
 def bump_for(commits):
     """-> "major"/"minor"/"patch"/None, the highest bump found across all commits since the last tag (not
-    cumulative per commit -- one feat and ten fixes is still just a minor bump, the usual semantic-release rule)."""
-    level = None
+    cumulative per commit -- one feat and ten fixes is still just a minor bump, the usual semantic-release rule).
+
+    Ranked explicitly by RANK and taking the max, not "first commit of a given type wins": `git log` lists
+    newest first, so a short-circuiting `level = level or "minor"` -- set once, never overwritten -- let a fix:
+    commit (seen first, since it's newest) permanently block an older feat: commit from ever upgrading patch to
+    minor. That shipped once already (v0.0.1 got tagged for a commit set that should have been v0.1.0); this is
+    what actually fixes it, not just patches the symptom, and tests/next_version_test.py locks in why."""
+    best = None
     for c in commits:
         _, subject, body = (c.split("\x01") + ["", "", ""])[:3]
         m = CONVENTIONAL.match(subject)
@@ -57,11 +66,10 @@ def bump_for(commits):
         typ, _scope, bang, _desc = m.groups()
         if bang or BREAKING_FOOTER.search(body):
             return "major"  # nothing outranks this; stop looking
-        if typ == "feat":
-            level = level or "minor"
-        elif typ == "fix" and level is None:
-            level = "patch"
-    return level
+        lvl = "minor" if typ == "feat" else "patch" if typ == "fix" else None
+        if lvl and (best is None or RANK[lvl] > RANK[best]):
+            best = lvl
+    return best
 
 
 def main():
