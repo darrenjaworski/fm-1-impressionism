@@ -181,13 +181,12 @@ static void draw_pond(void)
     uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
     uint32_t dim = set.drone_on ? 100u : 65u;    /* drone off: a cooler, dimmer pond (ROADMAP.md) */
     rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
-    rgb_t leaf = {40, 90, 55};                   /* a muted lily-pad green; not one of scene.h's reactive colours */
     cv_begin(240, POND_H * 10u, C_BLACK);
     for (y = 0; y < POND_H; y++)
         for (x = 0; x < POND_W; x++) {
             rgb_t c;
             if (cell_kind(x, y) == CELL_PAD) {
-                c = pad_i < active_n ? bloom : leaf;
+                c = pad_i < active_n ? bloom : pad_leaf_rgb(x, y);   /* Monet's two leaf greens, scene.h */
                 pad_i++;
             } else {
                 uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */

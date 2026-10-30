@@ -18,27 +18,49 @@ static rgb_t lerp_rgb(rgb_t a, rgb_t b, uint32_t t, uint32_t t_max)   /* t/t_max
     return c;
 }
 
-/* ENC_KNOB2 (colour), 0..31: the pond's overall temperature, a cool dusk (0) to a warm golden-hour (31) */
+/* Monet's Water Lilies palette (user-specified, 2026-10-30, picked by eye from the reference painting): purple
+   flowers over blue-green water and teal-green pads. Every reactive colour below is anchored to one of these
+   five, not an invented hue -- "support this colour palette" means the whole pond stays inside it. */
+#define MONET_WATER_DARK_R 0x3Bu
+#define MONET_WATER_DARK_G 0x66u
+#define MONET_WATER_DARK_B 0x8Cu
+#define MONET_WATER_LIGHT_R 0x58u
+#define MONET_WATER_LIGHT_G 0x88u
+#define MONET_WATER_LIGHT_B 0xA6u
+#define MONET_LEAF_DARK_R 0x28u
+#define MONET_LEAF_DARK_G 0x59u
+#define MONET_LEAF_DARK_B 0x59u
+#define MONET_LEAF_LIGHT_R 0x67u
+#define MONET_LEAF_LIGHT_G 0x8Cu
+#define MONET_LEAF_LIGHT_B 0x4Du
+#define MONET_FLOWER_R 0x84u
+#define MONET_FLOWER_G 0x51u
+#define MONET_FLOWER_B 0xA6u
+
+/* ENC_KNOB2 (colour), 0..31: the water's own tone, the painting's deep blue (0) to its lit blue-teal (31) --
+   brightness only, no hue shift, since the reference palette has no separate warm tone to shift toward. */
 #define COLOR_MAX 31u
-static rgb_t color_to_sky_rgb(uint32_t color)
-{
-    rgb_t dusk = { 40, 60, 110 }, gold = { 230, 170, 90 };
-    return lerp_rgb(dusk, gold, color, COLOR_MAX);
-}
 static rgb_t color_to_water_rgb(uint32_t color)
 {
-    rgb_t dusk = { 20, 50, 70 }, gold = { 120, 130, 50 };
-    return lerp_rgb(dusk, gold, color, COLOR_MAX);
+    rgb_t dark = { MONET_WATER_DARK_R, MONET_WATER_DARK_G, MONET_WATER_DARK_B };
+    rgb_t light = { MONET_WATER_LIGHT_R, MONET_WATER_LIGHT_G, MONET_WATER_LIGHT_B };
+    return lerp_rgb(dark, light, color, COLOR_MAX);
 }
 
 /* the lily blooms' colour, one per chord template. templ lines up with planing.h's CHORD_MAJ7 (0) / CHORD_ADD9
    (1) by index, not by including planing.h -- scene.h stays decoupled from the music logic, impressionism.c
-   wires the two together. */
-static const rgb_t CHORD_BLOOM_RGB[2] = {
-    { 255, 182, 213 },   /* maj7: a soft pink */
-    { 221, 190, 255 },   /* add9: a pale violet */
-};
-static rgb_t chord_templ_to_bloom_rgb(uint32_t templ) { return CHORD_BLOOM_RGB[templ]; }
+   wires the two together. Both are the painting's one flower purple (#8451A6, user-specified exactly for
+   maj7); add9 is the same purple dimmed, not a different hue -- there's only one flower colour to work with. */
+static rgb_t chord_templ_to_bloom_rgb(uint32_t templ)
+{
+    rgb_t c = { MONET_FLOWER_R, MONET_FLOWER_G, MONET_FLOWER_B };
+    if (templ != 0u) {                           /* add9: ~70% brightness of the same purple */
+        c.r = (uint8_t)((uint32_t)c.r * 7u / 10u);
+        c.g = (uint8_t)((uint32_t)c.g * 7u / 10u);
+        c.b = (uint8_t)((uint32_t)c.b * 7u / 10u);
+    }
+    return c;
+}
 
 /* ENC_ALGORITHM (density), 0..3 -> how many of the pond's "pad" cells read as active/lit, out of some total.
    Roughly an eighth at density 0 (never zero: a totally dark pond reads as dead, not sparse), up to roughly
@@ -77,4 +99,13 @@ static uint32_t cell_hash(uint32_t x, uint32_t y)   /* a cheap 2D hash: determin
 static uint32_t cell_kind(uint32_t x, uint32_t y)
 {
     return (cell_hash(x, y) % 100u) < 22u ? CELL_PAD : CELL_WATER;   /* ~22% pads: tune by eye on real hardware */
+}
+
+/* a PAD cell's leaf colour: one of the painting's two greens, picked per cell (fixed, like cell_kind -- the
+   pond's composition, not something that reacts) so the leaves read as varied rather than flat */
+static rgb_t pad_leaf_rgb(uint32_t x, uint32_t y)
+{
+    rgb_t dark = { MONET_LEAF_DARK_R, MONET_LEAF_DARK_G, MONET_LEAF_DARK_B };
+    rgb_t light = { MONET_LEAF_LIGHT_R, MONET_LEAF_LIGHT_G, MONET_LEAF_LIGHT_B };
+    return (cell_hash(x, y) >> 3 & 1u) ? light : dark;   /* a different bit than cell_kind's %100 uses */
 }

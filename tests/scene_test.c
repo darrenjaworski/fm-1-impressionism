@@ -9,20 +9,40 @@ static void check(int ok, const char *what) { printf("scene: %-66s %s\n", what, 
 
 int main(void)
 {
-    /* Seam E: colour temperature (ENC_KNOB2, 0..31). Cool dusk at 0, warm gold at 31; red should rise and blue
-       should fall as the knob turns up, for both the sky and the water reference colours. */
+    /* Seam E: colour temperature (ENC_KNOB2, 0..31) -> the water's own tone, darker at 0, lighter at 31. The
+       exact endpoints are Monet's Water Lilies palette, picked by eye from the reference painting (user,
+       2026-10-30), not placeholders -- locked in literally, not just "brighter", so a future edit can't drift
+       off the actual reference colours without this test noticing. */
     {
-        rgb_t sky_lo = color_to_sky_rgb(0), sky_hi = color_to_sky_rgb(31);
         rgb_t water_lo = color_to_water_rgb(0), water_hi = color_to_water_rgb(31);
-        check(sky_hi.r > sky_lo.r && sky_hi.b < sky_lo.b, "sky warms up (more red, less blue) as color rises");
-        check(water_hi.r > water_lo.r && water_hi.b < water_lo.b, "water warms up the same way");
+        check(water_lo.r == 0x3B && water_lo.g == 0x66 && water_lo.b == 0x8C, "water at color=0 is the painting's deep blue, #3B668C");
+        check(water_hi.r == 0x58 && water_hi.g == 0x88 && water_hi.b == 0xA6, "water at color=31 is the painting's lit blue-teal, #5888A6");
+        check(water_hi.r > water_lo.r && water_hi.g > water_lo.g && water_hi.b > water_lo.b, "water brightens uniformly as color rises (no hue shift, just darker/lighter)");
     }
 
-    /* Seam F: the bloom palette. One colour per chord template (CHORD_MAJ7/CHORD_ADD9, planing.h), and they're
-       meant to read as distinct at a glance (ROADMAP.md: "lily-pad bloom colour shift" on a chord change). */
+    /* Seam F: the bloom palette. One colour per chord template (CHORD_MAJ7/CHORD_ADD9, planing.h); both anchored
+       to the painting's single purple flower colour (#8451A6, user-specified exactly, not a derived hue) --
+       the two templates read as distinct via brightness, not by inventing a second colour not in the reference. */
     {
         rgb_t maj7 = chord_templ_to_bloom_rgb(0), add9 = chord_templ_to_bloom_rgb(1);
-        check(maj7.r != add9.r || maj7.g != add9.g || maj7.b != add9.b, "the two chord templates get visibly different bloom colours");
+        check(maj7.r == 0x84 && maj7.g == 0x51 && maj7.b == 0xA6, "maj7's bloom is the painting's flower purple, #8451A6, exactly");
+        check(maj7.r != add9.r || maj7.g != add9.g || maj7.b != add9.b, "the two chord templates get visibly different bloom brightness");
+        check(add9.r <= maj7.r && add9.g <= maj7.g && add9.b <= maj7.b, "add9 is a dimmer shade of the same purple, not a different hue");
+    }
+
+    /* Seam F2: the pad/leaf colours -- also from the reference painting, picked per cell (deterministic, fixed
+       composition, same reasoning as cell_kind below) so the pond's leaves read as varied, not flat. */
+    {
+        uint32_t x, y, saw_dark = 0, saw_light = 0, other = 0;
+        for (y = 0; y < POND_H; y++)
+            for (x = 0; x < POND_W; x++) {
+                rgb_t c = pad_leaf_rgb(x, y);
+                if (c.r == 0x28 && c.g == 0x59 && c.b == 0x59) saw_dark = 1;
+                else if (c.r == 0x67 && c.g == 0x8C && c.b == 0x4D) saw_light = 1;
+                else other = 1;
+            }
+        check(saw_dark && saw_light, "both leaf tones (#285959, #678C4D) turn up across the pond");
+        check(!other, "leaf colour is always one of exactly those two tones, nothing else");
     }
 
     /* Seam G: active-cell count (ENC_ALGORITHM, density 0..3) -> how many of the pond's lily pads read as

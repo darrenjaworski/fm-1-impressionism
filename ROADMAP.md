@@ -54,11 +54,18 @@ An impressionist pixel-art lily-pond scene (Monet-ish), not a static image — p
 `cv_text` primitives; deliberately blocky/low-fidelity ("pixel art"), not an attempt at smooth photographic
 gradients.
 
+**Palette (user-specified, 2026-10-30, picked by eye from Monet's actual _Water Lilies_)** — five colours,
+`firmware/src/scene.h`'s `MONET_*` constants, nothing else: `#3B668C`/`#5888A6` (deep/lit blue water),
+`#285959`/`#678C4D` (two pad-leaf greens, picked per cell for texture), `#8451A6` (the one flower purple; the
+second chord template is the same purple dimmed, not a different hue — there's only one flower colour in the
+reference). The color knob brightens/darkens the water within this range; it doesn't shift hue (the reference
+palette has no separate warm tone to shift toward).
+
 Reactive mapping:
 
 | Drives                                | Affects                                                                 |
 | ------------------------------------- | ----------------------------------------------------------------------- |
-| `ENC_KNOB2` (color), continuous       | overall scene color temperature/brightness                              |
+| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)  |
 | a chord-change event                  | lily-pad bloom color shift, at that instant                             |
 | `ENC_KNOB1` (drift rate), continuous  | speed of the water-ripple/reflection animation                          |
 | `ENC_ALGORITHM` (density), continuous | how many lily pads/ripples look "active" at once                        |
