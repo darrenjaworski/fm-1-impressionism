@@ -110,3 +110,35 @@ get listed in `fm1-emu`'s own hosted instance instead of self-hosting); how the 
 stays in sync with releases (a GitHub Pages deploy step reading the latest `v*` release asset, most likely);
 licensing/attribution for whichever emulator gets vendored in (both are GPL-3.0-compatible, but neither is
 written by this project and needs its own credit in `LICENSING.md` if its code ends up in this repo).
+
+**Decided and fully researched (2026-10-30): `fm1-emu`.** Better-documented customization path, actively
+maintained. `site/firmwares.json` already exists in this repo — this project's own single-firmware catalog
+override, in `fm1-emu`'s exact schema, `"default": "impressionism"`, `"package": "impressionism.fwsc"` (a
+relative URL, resolved against this repo's own Pages origin, not fm1-emu's).
+
+**The exact build, researched from `fm1-emu`'s own source and CI** (its `.github/workflows/pages.yml`
+`Build the site` step calls `tools/build_site.sh`, which for a non-SMK-37 build is just `web/build.sh` — the
+SMK-37/`fm1-sid` submodule parts aren't needed here):
+
+1. Checkout this repo (path `impressionism/`) **and** `joakimeriksson/fm1-emu` at a pinned commit (path
+   `fm1-emu/`) — pinned: `93cb7ee3f7008b27959ba73073b864e37efd7289` (`master`, as of this research). Bump that
+   pin deliberately later, don't let it drift.
+2. `rustup target add wasm32-unknown-unknown` (GitHub's `ubuntu-latest` runners ship Rust/cargo already).
+3. `fm1-emu/web/build.sh "$GITHUB_WORKSPACE/dist"` — builds the `fm1-web` crate to WASM and copies the page
+   (`index.html`, `style.css`, `main.js`, `persistence.js`, `worklet.js`, `jit.js`, `fwsc.js`,
+   `firmwares.json`, plus a report PDF and an OG image) into `dist/`. This is GPL-3.0, same as this project;
+   needs its own credit in `LICENSING.md` once actually vendored in (not done yet — the workflow was never
+   committed, see below).
+4. `gh release download --repo <this repo> --pattern 'impressionism-*.fwsc'`, pick the one that isn't an
+   `*-smk37*` variant, copy it into `dist/impressionism.fwsc` (a stable name across releases, so
+   `firmwares.json`'s URL never needs updating when a new version ships).
+5. Overwrite `dist/firmwares.json` with this repo's own `site/firmwares.json`.
+6. Publish `dist/` via the same `configure-pages`/`upload-pages-artifact`/`deploy-pages` steps the hello-world
+   page already uses (`.github/workflows/pages.yml`), triggered on push to `site/**`, on a new GitHub Release
+   (`release: types: [published]`, so a new version's build reaches the emulator too), and `workflow_dispatch`.
+
+**Blocked, not done:** writing this into `.github/workflows/pages.yml` was refused by Claude Code's own
+auto-mode classifier ("Untrusted Code Integration") — checking out and compiling a third party's source as
+part of this repo's CI is a real supply-chain-risk pattern worth a human's explicit sign-off, and that wasn't
+routed around. **A human needs to either grant that permission and ask again, or write the workflow directly**
+from the steps above (every file/step/URL needed is spelled out here; nothing else to research first).

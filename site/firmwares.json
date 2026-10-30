@@ -1,0 +1,16 @@
+{
+  "note": "This project's own single-firmware catalog for the vendored fm1-emu page (.github/workflows/pages.yml) -- not auto-synced to the release version, update by hand if it goes stale. \"package\" is filled in at build time with this repo's latest release asset, published alongside this file as impressionism.fwsc (a stable name across releases).",
+  "default": "impressionism",
+  "firmwares": [
+    {
+      "id": "impressionism",
+      "name": "Impressionism",
+      "version": "",
+      "author": "Darren Jaworski",
+      "license": "GPL-3.0",
+      "about": "A generative ambient instrument in the harmonic language of Debussy/Ravel-era Impressionism: whole-tone and pentatonic drift, extended and quartal chords, parallel chord motion over a sustained drone, with no clocked sequencer. Forked from zvenson/dinghy.",
+      "repo": "https://github.com/darrenjaworski/fm-1-impressionism",
+      "package": "impressionism.fwsc"
+    }
+  ]
+}
