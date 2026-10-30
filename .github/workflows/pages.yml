@@ -10,9 +10,13 @@
 # checked in. Pinned to a specific commit for reproducibility; bump FM1_EMU_REF deliberately to pick up
 # upstream changes, not by drifting. GPL-3.0, same as this project; credited in LICENSING.md.
 #
-# Triggers: a direct change to this page's own files (site/**, or this workflow); and a published release
-# (release.yml), so the emulator's copy of the firmware stays on the latest build even when nothing in site/
-# itself changed.
+# Triggers: a direct change to this page's own files (site/**, or this workflow); and a published release, so
+# the emulator's copy of the firmware stays on the latest build even when nothing in site/ itself changed. The
+# `release` trigger below does NOT fire on its own when release.yml publishes one -- GITHUB_TOKEN-authored, same
+# anti-recursion rule as a GITHUB_TOKEN tag push not triggering other workflows -- so release.yml's `firmware`
+# job explicitly runs `gh workflow run pages.yml` as its last step. The trigger stays here regardless: it's not
+# wrong, just insufficient alone for that path -- it still fires correctly for a release published any other
+# way (the GitHub UI, a human's own token, ...).
 name: pages
 
 on:
