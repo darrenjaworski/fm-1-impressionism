@@ -165,3 +165,7 @@ auto-mode classifier ("Untrusted Code Integration") — checking out and compili
 part of this repo's CI is a real supply-chain-risk pattern worth a human's explicit sign-off, and that wasn't
 routed around. **A human needs to either grant that permission and ask again, or write the workflow directly**
 from the steps above (every file/step/URL needed is spelled out here; nothing else to research first).
+
+## claude tooling
+
+- skill to make running local web emulator from a local firmware build
