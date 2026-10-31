@@ -8,11 +8,11 @@
  * nothing listens to them. Four voices, fixed roles:
  *
  *   voice 0   the drone: a sustained root/pedal tone. Re-roots itself on its own slow, independent timer.
- *   voice 1-3 the chord's three colour tones above that root, from a template (maj7 or add9, ROADMAP.md),
+ *   voice 1-3 the chord's three colour tones above that root, from one of 8 templates (ROADMAP.md),
  *             each triggered individually when quiet, holding for 2.5-7 s then releasing
  *
  * Panel (ROADMAP.md's agreed mapping):
- *   ENC_SELECT     scale: whole-tone / pentatonic (toggles on any turn)
+ *   ENC_SELECT     scale: cycles through 6 (whole-tone, pentatonic, minor pentatonic, Lydian, Mixolydian, Dorian)
  *   ENC_ALGORITHM  density: how often the chord re-planes (0 sparsest .. 3 densest)
  *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
  *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
@@ -21,7 +21,7 @@
  *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
- * re-randomizes fresh each boot (engine_rng is seeded from fm1_ms) -- only the knob settings are meant to survive, ROADMAP.md).
+ * re-randomizes fresh each boot (engine_rng is seeded from boot time and ADC noise) -- only the knob settings are meant to survive, ROADMAP.md).
  *
  * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
  * lily blooms coloured by the current chord template (and rippling with the water), a slow constant shimmer and a
@@ -45,6 +45,10 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 
 #ifndef ISR_TIMING
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
+#endif
+#ifndef SEED_SHOW
+#define SEED_SHOW 0                             /* 1: show the boot seed in hex on screen, to check it differs across power-ons.
+                                                   Same line as ISR_TIMING, so not both at once */
 #endif
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
@@ -180,6 +184,9 @@ static uint32_t note_to_inc(int32_t note)
 static int32_t clamp_degree(int32_t d) { return d < DEGREE_MIN ? DEGREE_MIN : d > DEGREE_MAX ? DEGREE_MAX : d; }
 
 static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
+#if SEED_SHOW && !defined(DINGHY_HOST)
+static uint32_t boot_seed;                       /* the seed app_main gave engine_rng, shown by draw_seed */
+#endif
 static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
@@ -196,9 +203,8 @@ static void retune_drone(uint32_t scale)
 /* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
 static void replane(uint32_t scale, uint32_t density, uint32_t drift)
 {
-    plan_t p = plan_next(scale, plane_degree, drift, &engine_rng);
-    plane_degree = clamp_degree(p.degree);
-    chord_templ = p.templ;
+    plane_degree = clamp_degree(plan_next(plane_degree, drift, &engine_rng));
+    chord_templ = pick_chord(scale, home_degree + plane_degree, &engine_rng);
     next_plane_ms = fm1_ms + next_trigger_ticks(density, &engine_rng);
 }
 
@@ -207,9 +213,9 @@ static void replane(uint32_t scale, uint32_t density, uint32_t drift)
    size and resetting the chord back onto the new root when it moves (flagged design choice, see ROADMAP.md) */
 static void reroot(uint32_t scale, uint32_t drift)
 {
-    plan_t p = plan_next(scale, home_degree, drift, &engine_rng);
-    home_degree = clamp_degree(p.degree);
+    home_degree = clamp_degree(plan_next(home_degree, drift, &engine_rng));
     plane_degree = 0;
+    chord_templ = pick_chord(scale, home_degree, &engine_rng);
     retune_drone(scale);
     next_root_ms = fm1_ms + 60000u + rng_next(&engine_rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
 }
@@ -246,7 +252,8 @@ static int quiet(void)
 /* ---- the screen: a reactive pixel-art lily pond (scene.h), plus a small status-text overlay below it */
 #define C_ACC RGB(180, 140, 255)
 #define C_OFF RGB(90, 90, 90)
-static const char *const SCALE_NAME[SCALE_COUNT] = {"WHOLE-TONE", "PENTATONIC"};
+static const char *const SCALE_NAME[SCALE_COUNT] = {"WHOLE-TONE", "PENTATONIC", "MINOR PENTATONIC", "LYDIAN",
+                                                    "MIXOLYDIAN", "DORIAN"};
 #define POND_Y 58                               /* screen y where the pond's canvas strip gets blitted */
 static uint32_t pond_total_pads, ripple_phase;   /* the layout is fixed (scene.h); counted once, not per draw */
 
@@ -347,6 +354,21 @@ static void draw_isr_time(void)                 /* worst app_audio block so far,
 static void draw_isr_time(void) {}
 #endif
 
+#if SEED_SHOW && !defined(DINGHY_HOST)
+static void draw_seed(void)                     /* the boot seed in hex, on draw_isr_time's line */
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    char s[14];
+    uint32_t k;
+    s[0] = 'S'; s[1] = 'E'; s[2] = 'E'; s[3] = 'D'; s[4] = ' ';
+    for (k = 0; k < 8u; k++) s[5u + k] = HEX[boot_seed >> (28u - 4u * k) & 15u];
+    s[13] = 0;
+    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, s, C_OFF, 1);
+}
+#else
+static void draw_seed(void) {}
+#endif
+
 static void app_main(void)
 {
     uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
@@ -355,7 +377,20 @@ static void app_main(void)
     if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
         set.color > 31u || set.drone_on > 1u)
         set_defaults();
-    engine_rng = fm1_ms ? fm1_ms : 1u;             /* seed with boot time for unique sequences each startup */
+#ifndef DINGHY_HOST
+    {   /* boot seed: the ms counter, the CPU tick count and two ADC reads (battery, master pot) are mixed together,
+           so the start depends on all of them. A timed-out read (-1) is skipped. cell_hash spreads the bits; 0 is
+           never a seed. Whether it differs between power-ons is checked on hardware with SEED_SHOW (ROADMAP.md). */
+        uint32_t seed = cell_hash(fm1_ms, fm1_ticks());
+        int32_t a;
+        if ((a = fm1_adc_read(FM1_ADC_BATT)) >= 0) seed = cell_hash(seed, (uint32_t)a);
+        if ((a = fm1_adc_read(FM1_ADC_MASTER)) >= 0) seed = cell_hash(seed, (uint32_t)a);
+        engine_rng = seed ? seed : 1u;
+#if SEED_SHOW
+        boot_seed = engine_rng;
+#endif
+    }
+#endif
     filter_k = color_to_filter_k(set.color);
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
@@ -371,7 +406,7 @@ static void app_main(void)
     draw_status();
     scale_drawn = set.scale;
     state_drawn = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
-                  set.scale << 11u;
+                  set.scale << 13u;
     next_draw_ms = fm1_ms + 300u;                 /* the pond's shimmer redraws on its own slow tick too */
 
     {   /* backlight every button (the FM-1's 14 are ids 0..13; a no-op on the SMK-37). The glow is its own dim layer
@@ -384,7 +419,10 @@ static void app_main(void)
     for (;;) {
         platform_poll();
 
-        if ((e = fm1_enc_take(ENC_SELECT)) != 0) { set.scale ^= 1u; dirty = 1; t_change = fm1_ms; }
+        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
+            set.scale = (uint8_t)scale_step(set.scale, e);
+            dirty = 1; t_change = fm1_ms;
+        }
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {
             int32_t d = (int32_t)set.density + e;
             set.density = (uint8_t)(d < 0 ? 0 : d > 3 ? 3 : d);
@@ -460,7 +498,7 @@ static void app_main(void)
         }
 
         st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
-             set.scale << 11u;
+             set.scale << 13u;
         if (st != state_drawn) {                 /* a real settings/chord change: redraw both right away */
             state_drawn = st;
             draw_pond();
@@ -470,6 +508,7 @@ static void app_main(void)
                                                                    the title and status text never change here */
             draw_pond();
             draw_isr_time();
+            draw_seed();
             next_draw_ms = fm1_ms + 300u;
         }
 

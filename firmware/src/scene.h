@@ -39,7 +39,7 @@ static rgb_t lerp_rgb(rgb_t a, rgb_t b, uint32_t t, uint32_t t_max)   /* t/t_max
 #define MONET_LEAF_LIGHT_G 0xB8u
 #define MONET_LEAF_LIGHT_B 0x5Fu
 
-/* Flower blooms (maj7 at full brightness, add9 dimmed ~70%) */
+/* Flower blooms: the one purple, dimmed per chord template (see chord_templ_to_bloom_rgb) */
 #define MONET_FLOWER_R 0x84u
 #define MONET_FLOWER_G 0x51u
 #define MONET_FLOWER_B 0xA6u
@@ -54,18 +54,18 @@ static rgb_t color_to_water_rgb(uint32_t color)
     return lerp_rgb(dark, light, color, COLOR_MAX);
 }
 
-/* the lily blooms' colour, one per chord template. templ lines up with planing.h's CHORD_MAJ7 (0) / CHORD_ADD9
-   (1) by index, not by including planing.h -- scene.h stays decoupled from the music logic, impressionism.c
-   wires the two together. Both are the painting's one flower purple (#8451A6, user-specified exactly for
-   maj7); add9 is the same purple dimmed, not a different hue -- there's only one flower colour to work with. */
+/* the lily blooms' colour, one per chord template. The table is indexed by planing.h's CHORD_* values by position,
+   not by including planing.h -- scene.h stays decoupled from the music logic, impressionism.c wires the two
+   together. Every template is the painting's one flower purple (#8451A6, user-specified exactly for maj7), at its
+   own percent of that brightness: no second hue, only the dimming tells the chords apart. */
 static rgb_t chord_templ_to_bloom_rgb(uint32_t templ)
 {
+    static const uint32_t BLOOM_PCT[8] = { 100u, 70u, 88u, 76u, 94u, 82u, 91u, 73u };
     rgb_t c = { MONET_FLOWER_R, MONET_FLOWER_G, MONET_FLOWER_B };
-    if (templ != 0u) {                           /* add9: ~70% brightness of the same purple */
-        c.r = (uint8_t)((uint32_t)c.r * 7u / 10u);
-        c.g = (uint8_t)((uint32_t)c.g * 7u / 10u);
-        c.b = (uint8_t)((uint32_t)c.b * 7u / 10u);
-    }
+    uint32_t k = BLOOM_PCT[templ];
+    c.r = (uint8_t)((uint32_t)c.r * k / 100u);
+    c.g = (uint8_t)((uint32_t)c.g * k / 100u);
+    c.b = (uint8_t)((uint32_t)c.b * k / 100u);
     return c;
 }
 

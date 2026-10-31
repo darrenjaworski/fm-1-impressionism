@@ -1,0 +1,26 @@
+# ENC_SELECT (encoder 0) cycles the scale: from pentatonic (the default) up through all six, wrapping to whole-tone,
+# then back down through all six. A screen after every turn, so the scale names can be read.
+1000 shot
+2000 enc 0 1
+2500 shot
+3000 enc 0 1
+3500 shot
+4000 enc 0 1
+4500 shot
+5000 enc 0 1
+5500 shot
+6000 enc 0 1
+6500 shot
+7000 enc 0 -1
+7500 shot
+8000 enc 0 -1
+8500 shot
+9000 enc 0 -1
+9500 shot
+10000 enc 0 -1
+10500 shot
+11000 enc 0 -1
+11500 shot
+11600 enc 0 -1
+11700 shot
+12000 end

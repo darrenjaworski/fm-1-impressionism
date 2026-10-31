@@ -28,6 +28,26 @@ int main(void)
         check(maj7.r == MONET_FLOWER_R && maj7.g == MONET_FLOWER_G && maj7.b == MONET_FLOWER_B, "maj7's bloom is the painting's flower purple");
         check(maj7.r != add9.r || maj7.g != add9.g || maj7.b != add9.b, "the two chord templates get visibly different bloom brightness");
         check(add9.r <= maj7.r && add9.g <= maj7.g && add9.b <= maj7.b, "add9 is a dimmer shade of the same purple, not a different hue");
+        check(add9.r == 92 && add9.g == 56 && add9.b == 116, "add9's bloom is 70% of the flower purple: (92,56,116)");
+    }
+
+    /* Seam F3: each of the 8 chord templates has its own bloom shade (scene.h's per-template brightness table).
+       All distinct, none brighter than maj7, none black. */
+    {
+        uint32_t a, b, dup = 0, brighter = 0, black = 0;
+        rgb_t maj7 = chord_templ_to_bloom_rgb(0);
+        for (a = 0; a < 8u; a++) {
+            rgb_t ca = chord_templ_to_bloom_rgb(a);
+            if (ca.r == 0 && ca.g == 0 && ca.b == 0) black = 1;
+            if (ca.r > maj7.r || ca.g > maj7.g || ca.b > maj7.b) brighter = 1;
+            for (b = a + 1; b < 8u; b++) {
+                rgb_t cb = chord_templ_to_bloom_rgb(b);
+                if (ca.r == cb.r && ca.g == cb.g && ca.b == cb.b) dup = 1;
+            }
+        }
+        check(!dup, "all 8 chord templates have distinct bloom colours");
+        check(!brighter, "no chord template's bloom is brighter than maj7's");
+        check(!black, "no chord template's bloom is black");
     }
 
     /* Seam F2: the pad/leaf colours -- also from the reference painting, picked per cell (deterministic, fixed
