@@ -267,7 +267,7 @@ static void draw_pond(void)
     cv_begin(240, POND_H * 10u, C_BLACK);
     for (y = 0; y < POND_H; y++)
         for (x = 0; x < POND_W; x++) {
-            uint32_t shimmer = (cell_hash(x, y) + ripple_phase) % 8u;   /* 0..7: a travelling shimmer */
+            uint32_t shimmer = (cell_hash(x, y) + ripple_phase / 4u) % 8u;   /* 0..7: a slow meditative shimmer */
             rgb_t c;
             if (cell_kind(x, y) == CELL_PAD) {
                 c = pad_i < active_n ? shimmer_rgb(bloom, shimmer) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
