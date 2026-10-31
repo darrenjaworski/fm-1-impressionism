@@ -1,0 +1,2 @@
+# 3 minutes at defaults (plays colour notes)
+180000 end

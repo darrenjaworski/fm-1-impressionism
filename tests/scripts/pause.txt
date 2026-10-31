@@ -1,0 +1,4 @@
+# Pause/resume test: pause at 20s, resume at 25s, end at 30s
+20000 btn 12
+25000 btn 12
+30000 end
