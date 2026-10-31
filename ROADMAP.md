@@ -87,7 +87,7 @@ Everything in the mission not covered above, to add incrementally:
 
 ## Out of scope / not yet decided for any version
 
-- A reverb with feedback or a wet/dry knob. (A fixed feed-forward four-tap diffuser, `firmware/src/diffuse.h`, is built; its real ISR cost is still unmeasured on hardware: build with `-DISR_TIMING=1` to show the worst block time on screen, budget 2.9 ms.)
+- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 combs + 2 allpasses, ~7 s tail) replaces the old diffuser; measured worst audio ISR block on the FM-1 with it in: 0.6 ms (budget 2.9 ms, `ISR_TIMING=1` shows it on screen).
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
 ## Deferred items — done (2026-10-30 session 2)
