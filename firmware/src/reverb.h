@@ -5,7 +5,6 @@
 #define REVERB_H
 
 #include <stdint.h>
-#include <string.h>
 
 #define COMB1_DELAY 1277u
 #define COMB2_DELAY 1597u
@@ -22,7 +21,18 @@ typedef struct {
     int32_t damp1, damp2, damp3, damp4;
 } reverb_t;
 
-static inline void reverb_init(reverb_t *r) { memset(r, 0, sizeof(*r)); }
+static inline void reverb_init(reverb_t *r)
+{
+    uint32_t i;
+    for (i = 0; i < COMB1_DELAY; i++) r->buf1[i] = 0;
+    for (i = 0; i < COMB2_DELAY; i++) r->buf2[i] = 0;
+    for (i = 0; i < COMB3_DELAY; i++) r->buf3[i] = 0;
+    for (i = 0; i < COMB4_DELAY; i++) r->buf4[i] = 0;
+    for (i = 0; i < ALLPASS1_DELAY; i++) r->ap1[i] = 0;
+    for (i = 0; i < ALLPASS2_DELAY; i++) r->ap2[i] = 0;
+    r->pos1 = r->pos2 = r->pos3 = r->pos4 = r->ap1_pos = r->ap2_pos = 0;
+    r->damp1 = r->damp2 = r->damp3 = r->damp4 = 0;
+}
 
 static inline void reverb_step(reverb_t *r, int32_t in, int16_t *out_l, int16_t *out_r)
 {
