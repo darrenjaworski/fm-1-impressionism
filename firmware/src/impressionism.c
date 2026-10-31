@@ -259,41 +259,50 @@ static void init_pond(void)
             if (cell_kind(x, y) == CELL_PAD) pond_total_pads++;
 }
 
-static int32_t pad_jitter_x(uint32_t x, uint32_t y)  /* brownian movement for lily pads: small, mellow drift */
+static uint32_t tri8(uint32_t v)                /* triangle wave, period 16: 0..7..0, so neighbours differ by at most 1 */
 {
-    uint32_t h = cell_hash(x + ripple_phase / 32u, y);
-    return (int32_t)((h % 5u) - 2);  /* -2..+2 pixel drift per pad */
+    v &= 15u;
+    return v < 8u ? v : 15u - v;
 }
 
-static int32_t pad_jitter_y(uint32_t x, uint32_t y)
+/* a lily pad sits in its cell and wanders at most 2 px, to a new random spot every ~3.6 s (ripple_phase ticks ~300 ms) */
+static int32_t pad_jitter(uint32_t x, uint32_t y, uint32_t axis)
 {
-    uint32_t h = cell_hash(x, y + ripple_phase / 32u + 1000u);
-    return (int32_t)((h % 5u) - 2);
+    return (int32_t)(cell_hash(x + axis * 977u, y + ripple_phase / 12u) % 5u) - 2;
 }
 
 static void draw_pond(void)
 {
     uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
     uint32_t dim = set.drone_on ? 100u : 65u;    /* drone off: a cooler, dimmer pond (ROADMAP.md) */
+    uint32_t t1 = ripple_phase / 4u, t2 = ripple_phase / 6u;
     rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
     cv_begin(240, POND_H * 10u, C_BLACK);
-    for (y = 0; y < POND_H; y++)
+    for (y = 0; y < POND_H; y++)                  /* the water: one continuous field of two slow crossing waves */
         for (x = 0; x < POND_W; x++) {
-            uint32_t shimmer = (cell_hash(x, y) + ripple_phase / 4u) % 8u;   /* 0..7: a slow meditative shimmer */
+            uint32_t shimmer = (tri8(x * 2u + y + t1) + tri8(y * 3u + x * 2u + t2 * 2u)) / 2u;   /* 0..7 */
+            rgb_t c = shimmer_rgb(water, shimmer);
+            cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
+                    RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
+        }
+    for (y = 0; y < POND_H; y++)                  /* the pads on top: nearly stationary, each with a tiny random wander */
+        for (x = 0; x < POND_W; x++) {
             rgb_t c;
-            if (cell_kind(x, y) == CELL_PAD) {
-                c = pad_i < active_n ? shimmer_rgb(bloom, shimmer) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
-                pad_i++;
-            } else {
-                c = shimmer_rgb(water, shimmer);
-            }
-            int32_t px = (int32_t)(x * 10u) + pad_jitter_x(x, y);
-            int32_t py = (int32_t)(y * 10u) + pad_jitter_y(x, y);
+            int32_t px, py;
+            if (cell_kind(x, y) != CELL_PAD) continue;
+            c = pad_i < active_n ? shimmer_rgb(bloom, tri8(x + y + t1)) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
+            pad_i++;
+            px = (int32_t)(x * 10u) + pad_jitter(x, y, 0u);
+            py = (int32_t)(y * 10u) + pad_jitter(x, y, 1u);
+            if (px < 0) px = 0;
+            if (py < 0) py = 0;
+            if (px > 230) px = 230;
+            if (py > (int32_t)(POND_H * 10u) - 10) py = (int32_t)(POND_H * 10u) - 10;
             cv_rect(px, py, 10, 10,
                     RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
         }
     cv_blit(0, POND_Y);
-    ripple_phase += 1u;  /* slow, constant ripple: a meditative shimmer independent of controls */
+    ripple_phase += 1u;  /* slow, constant motion: a meditative pond independent of controls */
 }
 
 static void draw_chrome(void)                   /* once, at startup only: the black screen and the title never
