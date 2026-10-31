@@ -13,8 +13,8 @@
 #define ENV_QUIET_THRESHOLD 32u                 /* below this (Q8) the voice counts as quiet and may retrigger */
 
 typedef struct {
-    uint32_t level;                             /* Q8: 0 = silent, ENV_FULL = full */
-    uint32_t gate;                              /* 1: note held (attack/sustain), 0: released (decay) */
+    volatile uint32_t level;                    /* Q8: 0 = silent, ENV_FULL = full; shared ISR/main */
+    volatile uint32_t gate;                     /* 1: note held (attack/sustain), 0: released (decay); shared ISR/main */
 } env_t;
 
 static inline void env_init(env_t *e) { e->level = 0; e->gate = 0; }

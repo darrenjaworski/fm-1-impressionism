@@ -9,7 +9,7 @@
  *
  *   voice 0   the drone: a sustained root/pedal tone. Re-roots itself on its own slow, independent timer.
  *   voice 1-3 the chord's three colour tones above that root, from a template (maj7 or add9, ROADMAP.md),
- *             re-planed (a new template + a scale-degree transposition) on its own faster timer
+ *             each triggered individually when quiet, holding for 2.5-7 s then releasing
  *
  * Panel (ROADMAP.md's agreed mapping):
  *   ENC_SELECT     scale: whole-tone / pentatonic (toggles on any turn)
@@ -52,7 +52,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 static struct {
     volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 */
     volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
-    int32_t amp;                                /* the level now: glides to gate, no clicks */
+    volatile int32_t amp;                       /* the level now: glides to gate, no clicks; shared ISR/main */
     uint32_t ph;
     uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
     uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
@@ -70,14 +70,12 @@ static uint32_t note_off_ms[NV];               /* when each colour note's gate c
 #define HARM_4 2000                             /* 4th..6th partials, scaled by the note's brightness (see app_audio) */
 #define HARM_5 1300
 #define HARM_6 650
-#define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 #define DRONE_FULL 4000                         /* the pedal sits ~6 dB under the colour voices, else it swamps the spectrum */
 
-/* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
-   block at 256 frames/44.1 kHz -- sized for a few seconds each (soft-focus, CLAUDE.md's Mission), tune by ear
-   once this is heard on real hardware. Reduced for dreamier character: slower, more sustain. */
-#define ATTACK_STEP 8                           /* ~5.8 s, 0 -> GATE_FULL (slower fade-in) */
-#define RELEASE_STEP 5                          /* ~9.4 s, GATE_FULL -> 0 (slower fade-out) */
+/* ISR envelope glide: smooth the envelope toward the amp level per block (~5.8 ms) to avoid clicks.
+   Applied only to the drone; colour voices are shaped by envelope.h's attack/release. */
+#define ATTACK_STEP 8                           /* glide step when envelope level rises */
+#define RELEASE_STEP 5                          /* glide step when envelope level falls */
 
 #ifdef DINGHY_HOST
 static reverb_t reverb;                         /* host build: plain memory (the .pool section is ELF-only) */
@@ -189,7 +187,7 @@ static uint32_t next_note_ms[NV];                /* per-voice note-trigger timer
 static int32_t left_plane = 0, left_root = 0;   /* timer state when paused, for clean resume */
 static int32_t left_note_ms[NV];                 /* per-voice timer state when paused */
 
-static void retune_voices(uint32_t scale)
+static void retune_drone(uint32_t scale)
 {
     int32_t root_note = (int32_t)ROOT_BASE_NOTE - 12 + scale_degree_to_semitone(scale, home_degree);  /* drone: an octave below the chord */
     voice[0].inc = note_to_inc(root_note);
@@ -201,7 +199,6 @@ static void replane(uint32_t scale, uint32_t density, uint32_t drift)
     plan_t p = plan_next(scale, plane_degree, drift, &engine_rng);
     plane_degree = clamp_degree(p.degree);
     chord_templ = p.templ;
-    retune_voices(scale);
     next_plane_ms = fm1_ms + next_trigger_ticks(density, &engine_rng);
 }
 
@@ -213,7 +210,7 @@ static void reroot(uint32_t scale, uint32_t drift)
     plan_t p = plan_next(scale, home_degree, drift, &engine_rng);
     home_degree = clamp_degree(p.degree);
     plane_degree = 0;
-    retune_voices(scale);
+    retune_drone(scale);
     next_root_ms = fm1_ms + 60000u + rng_next(&engine_rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
 }
 
@@ -221,7 +218,6 @@ static void reroot(uint32_t scale, uint32_t drift)
 #define NOTE_MIN_MS 2500u                       /* how long a colour note is held before it releases: 2.5..7 s */
 #define NOTE_RANGE_MS 4500u
 
-/* a colour voice takes the chord as it is now, only when it is quiet, so no sounding note jumps pitch */
 static void trigger_note(uint32_t v, uint32_t scale)
 {
     int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
