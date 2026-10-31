@@ -209,6 +209,10 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
   accordingly, and call `reroot()` immediately instead of waiting for `next_root_ms`. The only proposal that
   touches the keybed, which v1 reads nowhere in `app_main()`. Still a macro control (press once, done), not
   note-by-note performance — consistent with the mission's "not a played-note synth".
+- **Status line layout** ✅: the top status line shows the scale, drone state and density (`PENTATONIC  DRONE ON  D0`).
+  The bottom row shows the knob values in the knobs' own order, left to right: `DRIFT 0   COLOUR 12` (ENC_KNOB1,
+  then ENC_KNOB2). Display only, so the knobs and their mapping are unchanged. The dev overlays `ISR_TIMING` and
+  `SEED_SHOW` draw on that bottom row too, so enable only one at a time.
 - **No tempo/BPM control, by design**: checked for any existing tempo/clock concept in the codebase — none
   exists (no `tempo`, `bpm`, or `clock_` anywhere). This is deliberate, not a gap: the mission is explicitly
   "no hard clock-quantized sequencer", and density/drift already cover "how often" and "how far" without a

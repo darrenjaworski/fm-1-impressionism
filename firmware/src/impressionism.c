@@ -324,19 +324,26 @@ static void draw_chrome(void)                   /* once, at startup only: the bl
 
 static void draw_status(void)                   /* only on a real settings/chord change, not every pond tick */
 {
-    char s[32];
-    uint32_t i = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, SCALE_NAME[set.scale], C_WHITE, 1);
-    {
-        const char *p = set.drone_on ? "DRONE ON " : "DRONE OFF";
-        while (*p) s[i++] = *p++;
-        s[i++] = ' '; s[i++] = ' ';
-        s[i++] = 'D'; s[i++] = (char)('0' + set.density);   /* density */
-        s[i++] = ' '; s[i++] = ' ';
-        s[i++] = 'R'; s[i++] = (char)('0' + set.drift);     /* drift rate */
-        s[i] = 0;
-    }
-    draw_text_box(0, POND_Y + POND_H * 10u + 26u, 240, &FONT_S, s, C_OFF, 1);
+    char s[32], k[32];
+    uint32_t i = 0, j = 0;
+    const char *p = SCALE_NAME[set.scale];
+    while (*p) s[i++] = *p++;
+    s[i++] = ' '; s[i++] = ' ';
+    p = set.drone_on ? "DRONE ON" : "DRONE OFF";
+    while (*p) s[i++] = *p++;
+    s[i++] = ' '; s[i++] = ' ';
+    s[i++] = 'D'; s[i++] = (char)('0' + set.density);   /* ENC_ALGORITHM */
+    s[i] = 0;
+    draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, s, C_WHITE, 1);
+    /* the knob row, in the knobs' order left to right: ENC_KNOB1 drift, then ENC_KNOB2 colour */
+    k[j++] = 'D'; k[j++] = 'R'; k[j++] = 'I'; k[j++] = 'F'; k[j++] = 'T'; k[j++] = ' ';
+    k[j++] = (char)('0' + set.drift);
+    k[j++] = ' '; k[j++] = ' '; k[j++] = ' ';
+    k[j++] = 'C'; k[j++] = 'O'; k[j++] = 'L'; k[j++] = 'O'; k[j++] = 'U'; k[j++] = 'R'; k[j++] = ' ';
+    if (set.color >= 10u) k[j++] = (char)('0' + set.color / 10u);
+    k[j++] = (char)('0' + set.color % 10u);
+    k[j] = 0;
+    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, k, C_OFF, 1);
 }
 
 #if ISR_TIMING && !defined(DINGHY_HOST)
