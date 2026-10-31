@@ -57,6 +57,9 @@ static struct {
     uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
     uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
 } voice[NV];
+/* each voice's place in the stereo field (Q15): the drone sits centre, the colour voices lean left, right and centre */
+static const int32_t pan_l[NV] = { 32767, 32767, 12000, 22000 };
+static const int32_t pan_r[NV] = { 32767, 12000, 32767, 22000 };
 static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
 static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
 static env_t env[NV];                          /* colour voices 1..3: each note attacks, holds, releases (envelope.h) */
@@ -64,6 +67,9 @@ static uint32_t note_off_ms[NV];               /* when each colour note's gate c
 #define HARM_FUND 22938                         /* the main partial's mix, Q15: fundamental 0.70, 2nd 0.20, 3rd 0.10 (sums to 1) */
 #define HARM_2 6554
 #define HARM_3 3277
+#define HARM_4 2000                             /* 4th..6th partials, scaled by the note's brightness (see app_audio) */
+#define HARM_5 1300
+#define HARM_6 650
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 #define DRONE_FULL 4000                         /* the pedal sits ~6 dB under the colour voices, else it swamps the spectrum */
 
@@ -97,6 +103,7 @@ static int32_t sine(uint32_t ph)                /* a full cycle over 2^32 -> -32
 static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t v, i;
+    int32_t bright;
 #if ISR_TIMING && !defined(DINGHY_HOST)
     uint32_t t_start = fm1_ticks();
 #endif
@@ -121,13 +128,16 @@ static void app_audio(int32_t *out, uint32_t n)
         }
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
+        bright = amp << 2;                      /* upper partials follow the note's level: bright at the start, warmer as it decays */
+        if (bright > 32767) bright = 32767;
         for (i = 0; i < n; i++) {
             int32_t h = (sine(ph) * HARM_FUND + sine(ph << 1) * HARM_2 + sine(ph + (ph << 1)) * HARM_3) >> 15;
-            int32_t s_main = (h * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
+            int32_t up = (sine(ph << 2) * HARM_4 + sine((ph << 2) + ph) * HARM_5 + sine(ph * 6u) * HARM_6) >> 15;
+            int32_t s_main = ((h + ((up * bright) >> 15)) * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
             ph += step;
             ph_d += step_d;
-            out[2u * i] += (3 * s_main + s_det) >> 2;         /* L leans on the main partial... */
-            out[2u * i + 1u] += (s_main + 3 * s_det) >> 2;    /* ...R on the detuned one: width from the chorus */
+            out[2u * i] += (((3 * s_main + s_det) >> 2) * pan_l[v]) >> 15;     /* L leans on the main partial... */
+            out[2u * i + 1u] += (((s_main + 3 * s_det) >> 2) * pan_r[v]) >> 15; /* ...R on the detuned one: width from the chorus */
         }
         voice[v].ph = ph;
         voice[v].ph_detune = ph_d;

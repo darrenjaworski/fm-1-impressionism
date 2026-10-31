@@ -108,6 +108,25 @@ Visual polish matching the soft-focus ambient aesthetic. Commit: `1184ac4`.
 and each colour voice's note timer) and fades all voices to silence over about 45 ms (the reverb tail rings out after that). Resume restarts the
 timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused.
 
+## Dreamier sound: measured against the reference (2026-10-31)
+
+Host renders, 3 minutes at default settings, first 15 s skipped. Targets are from the reference recording (a Debussy
+"Reverie" on a modular synth). The ear is the final judge; these numbers guide the work.
+
+| Metric | Before | Now | Target |
+| --- | --- | --- | --- |
+| Envelope range p95-p10 (1 s RMS) | 2.9 dB | 7.7 dB | 15+ dB |
+| Spectral centroid | 143 Hz | 236 Hz | 350-500 Hz |
+| 20-100 Hz band | -5 dB | -8 dB | -15 to -25 dB |
+| 1.6-3.2 kHz band | -73 dB | -38 dB | -25 to -35 dB |
+| L/R correlation | 0.58 | 0.51 | 0.3-0.5 |
+| Clipped samples | 802 | 0 | 0 |
+
+What changed to get here: colour notes attack, hold and release (`envelope.h`); the drone an octave lower and
+about 6 dB under the colour voices; a slow ~11-cent pitch drift per voice; a 2nd to 6th harmonic on each voice,
+scaled by the note's level; and a fixed stereo place per colour voice. Still open: the envelope range and centroid
+are short of target.
+
 ## An online playable version on this repo's GitHub Pages — done (2026-10-30)
 
 Goal: a browser-playable emulator hosted at this repo's own GitHub Pages, like
