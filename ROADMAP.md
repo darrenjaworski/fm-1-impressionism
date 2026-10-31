@@ -13,8 +13,9 @@ implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 vi
 **confirmed working by ear on the real hardware**. The pond screen is built (Monet palette and direction, see below);
 its slow ripple and lily-pad drift are decoupled from the panel, and their feel on the FM-1 display is still being tuned by eye. The
 Pages emulator is live and working. The worst audio ISR block is **1.3 ms of the 2.9 ms budget** (measured on the FM-1,
-2026-10-31, with 7 harmonics per voice and stereo). The generative RNG is seeded from boot time, so every power-on
-plays a different sequence. Remaining before public Hub submission: verify identity `FM-1_95N` against the Hub
+2026-10-31, with 7 harmonics per voice and stereo). The generative RNG is seeded from boot time and two ADC reads, so every
+power-on should play a different sequence. That is not yet checked on hardware: `SEED_SHOW=1` shows the seed in hex
+on screen, for the 3+ power-on check. Remaining before public Hub submission: verify identity `FM-1_95N` against the Hub
 catalogue, finish the control remap and feature set per v2 below.
 
 ## Initial scope (v0.0.1)
@@ -44,15 +45,15 @@ already provided by `platform.c`) and restored on boot — the instrument comes 
 
 ### Panel mapping (v1)
 
-| Control         | Does                                   |
-| --------------- | -------------------------------------- |
-| `ENC_SELECT`    | scale select (whole-tone / pentatonic) |
-| `ENC_ALGORITHM` | density (how often voices retrigger)   |
-| `ENC_KNOB1`     | drift rate                             |
-| `ENC_KNOB2`     | filter "color" (cutoff)                |
-| `BTN_ARP`       | drone on/off                           |
-| `BTN_PLAY`      | pause/resume (freeze timers, fade out) |
-| `MASTER`        | volume (unchanged from the stock demo) |
+| Control         | Does                                                    |
+| --------------- | ------------------------------------------------------- |
+| `ENC_SELECT`    | scale: cycles through 6 (see Chord and scale expansion) |
+| `ENC_ALGORITHM` | density (how often voices retrigger)                    |
+| `ENC_KNOB1`     | drift rate                                              |
+| `ENC_KNOB2`     | filter "color" (cutoff)                                 |
+| `BTN_ARP`       | drone on/off                                            |
+| `BTN_PLAY`      | pause/resume (freeze timers, fade out)                  |
+| `MASTER`        | volume (unchanged from the stock demo)                  |
 
 ### Screen: a living Monet pond
 
@@ -82,20 +83,19 @@ palette has no separate warm tone to shift toward).
 
 What the music drives (v1), and what it deliberately does not:
 
-| Drives                                | Affects                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------ |
-| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)   |
-| a chord-change event                  | lily-pad bloom colour shift, at that instant                             |
-| `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple at once                                  |
-| nothing (always on)                   | the water's flow, the pads' tiny wander                                  |
+| Drives                                | Affects                                                                    |
+| ------------------------------------- | -------------------------------------------------------------------------- |
+| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)     |
+| a chord-change event                  | lily-pad bloom colour shift, at that instant                               |
+| `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple at once                                    |
+| nothing (always on)                   | the water's flow, the pads' tiny wander                                    |
 | nothing (by design)                   | `BTN_ARP`, `ENC_KNOB1` (drift) and every other control never move the pond |
 
 ## Deferred to later versions
 
 Everything in the mission not covered above, to add incrementally:
 
-- Lydian, Mixolydian, Dorian modes.
-- Quartal (stacked-4ths) and sus2/sus4 chord templates, and 11th/13th extensions beyond maj7/add9.
+- 11th/13th extensions beyond the 8 chord templates (see Chord and scale expansion).
 - Slow LFO drift on filter cutoff/amplitude as an _automatic_ timbral layer (v1's `ENC_KNOB2` is a manual/live
   color control; the mission's "soft-focus... slow LFO drift" as something the instrument does on its own is not
   yet in scope).
@@ -152,9 +152,24 @@ are short of target.
 
 ### Chord and scale expansion
 
-- **Chord templates**: add sus2 (+2, +7, +12), sus4 (+5, +7, +12), 6/9 (+4, +7, +9), and quartal (+5, +12, +17), bringing the template count to 6. Each retrigger still picks one at random. Tests in `tests/planing_test.c`.
-- **Scales**: add minor pentatonic, Lydian, Mixolydian, Dorian (4 new scales, 6 total). ENC_SELECT cycles through them instead of toggling. **Fixes the fmhub.json claim** ("extended and quartal chords") — currently only maj7/add9 exist.
-- **Common-tone voice leading**: after replanning, favour chord templates that share tones with the outgoing one. This formalizes the mission's "parallel planing / common-tone motion" as motion rules, not just random walks.
+Done in code and host tests (`tests/planing_test.c`, `tests/scripts/scales.txt`). The FM-1 by-ear check is still to do.
+
+- **Chord templates**: 8 in total, intervals in semitones above the root: maj7 +4,+7,+11; add9 +4,+7,+14; sus2 +2,+7,+12;
+  sus4 +5,+7,+12; 6/9 +4,+9,+14; quartal +5,+10,+15; 9no5 +4,+10,+14; aug9 +4,+8,+14. (The earlier draft had
+  quartal as +5,+12,+17 and 6/9 as +4,+7,+9; both corrected here.)
+- **Degree-fit rule**: a template fits a scale degree when all three voices, above that degree's root, land on notes
+  of the scale (compared by pitch class). Fit depends on the degree, not just the scale: maj7 fits Lydian degree 0 but
+  not degree 1. Each replan picks at random among the templates that fit the new degree, and each reroot picks one
+  for the new root, so a chord never sits on a root it does not fit. Every degree of every scale has at least one.
+- **Whole-tone** loses maj7 and add9, and none of the first six templates fits it at any degree. It uses 9no5 and
+  aug9 only, the two shapes that fit.
+- **Scales**: 6 in total: whole-tone, pentatonic, minor pentatonic (0,3,5,7,10), Lydian (0,2,4,6,7,9,11), Mixolydian
+  (0,2,4,5,7,9,10), Dorian (0,2,3,5,7,9,10). **Fixes the fmhub.json claim** ("extended and quartal chords").
+- **`ENC_SELECT`** cycles through the 6 scales in both directions (`scale_step()`), with any number of detents. The
+  status overlay shows the scale name.
+- **Common-tone voice leading**: still open. It is planned with the `ENC_KNOB3` remap below, not done here. It would
+  favour chord templates that share tones with the outgoing one, so motion follows the mission's "parallel planing /
+  common-tone motion" rather than only a random walk.
 
 ### Control and interface
 
@@ -163,12 +178,9 @@ v1 uses 4 of the panel's 7 encoders (`ENC_SELECT`, `ENC_ALGORITHM`, `ENC_KNOB1`,
 unused hardware, as is the entire 27-key keybed. Proposed assignment for the rest, thought through in a
 2026-10-31 session:
 
-- **`ENC_SELECT` (upgrade from toggle to cycle)**: `set.scale = (set.scale + 1) % SCALE_COUNT` instead of
-  `^= 1u`, once the scale table grows past 2 entries (see Chord and scale expansion above). No new control,
-  no new concept — falls out of the scale-table work for free. The status-text overlay needs 6 scale names
-  instead of 2.
+- **`ENC_SELECT` (cycle, not toggle)**: done (see Chord and scale expansion above). No new control, no new concept.
 - **`ENC_ALGORITHM`**: unchanged — stays density (how often voices retrigger).
-- **`ENC_KNOB3` — voice-leading / chord-motion amount**: weights how `plan_next()` (`planing.h`) picks the
+- **`ENC_KNOB3` — voice-leading / chord-motion amount**: weights how `pick_chord()` (`planing.h`) picks the
   next chord template. At 0, pure random walk (today's behaviour); at 3, bias toward whichever remaining
   template shares the most absolute pitches with the outgoing chord. Mechanically: compute each candidate's
   resolved semitones, count overlaps with the current chord, weight the random pick by overlap count scaled
