@@ -339,7 +339,6 @@ static void app_main(void)
         set_defaults();
     filter_k = color_to_filter_k(set.color);
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
-    reverb_init(&reverb);                        /* zero the reverb buffers */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
     {   /* initialize per-voice note timers: drone re-roots slowly, colour voices trigger freely */
