@@ -25,8 +25,8 @@
  *
  * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
  * lily blooms coloured by the current chord template (and rippling with the water), a slow constant shimmer and a
- * small brownian drift of the pads that ignore the panel, and how many pads look "active" from density -- plus a small status-text overlay below it
- * (the scale name, drone state, D/R).
+ * small brownian drift of the pads that ignore the panel, and how many pads bloom from density (scene.h) -- plus a
+ * status-text overlay below it (status.h: the scale name, drone state, density, and the knob values).
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
@@ -40,6 +40,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
+#include "status.h"                             /* the status text under the pond: scale, drone, density, knobs */
 #include "reverb.h"                             /* Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, ~4.5 s tail */
 #include "envelope.h"                           /* per-note attack and release for the colour voices */
 
@@ -252,63 +253,30 @@ static int quiet(void)
 /* ---- the screen: a reactive pixel-art lily pond (scene.h), plus a small status-text overlay below it */
 #define C_ACC RGB(180, 140, 255)
 #define C_OFF RGB(90, 90, 90)
-static const char *const SCALE_NAME[SCALE_COUNT] = {"WHOLE-TONE", "PENTATONIC", "MINOR PENTATONIC", "LYDIAN",
-                                                    "MIXOLYDIAN", "DORIAN"};
 #define POND_Y 58                               /* screen y where the pond's canvas strip gets blitted */
-static uint32_t pond_total_pads, ripple_phase;   /* the layout is fixed (scene.h); counted once, not per draw */
+#define POND_TICK_MS 300u                       /* the pond's clock: one phase tick per 300 ms of fm1_ms, and the
+                                                   redraw tick (next_draw_ms) is the same 300 ms */
 
-static void init_pond(void)
-{
-    uint32_t x, y;
-    pond_total_pads = 0;
-    for (y = 0; y < POND_H; y++)
-        for (x = 0; x < POND_W; x++)
-            if (cell_kind(x, y) == CELL_PAD) pond_total_pads++;
-}
-
-static uint32_t tri8(uint32_t v)                /* triangle wave, period 16: 0..7..0, so neighbours differ by at most 1 */
-{
-    v &= 15u;
-    return v < 8u ? v : 15u - v;
-}
-
-/* a lily pad sits in its cell and wanders at most 2 px, to a new random spot every ~3.6 s (ripple_phase ticks ~300 ms) */
-static int32_t pad_jitter(uint32_t x, uint32_t y, uint32_t axis)
-{
-    return (int32_t)(cell_hash(x + axis * 977u, y + ripple_phase / 12u) % 5u) - 2;
-}
-
+/* the pond's motion comes from the clock (phase = fm1_ms / POND_TICK_MS), not from a count of redraws: a state
+   change that redraws early doesn't speed the water up or move the pads faster */
 static void draw_pond(void)
 {
-    uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
-    uint32_t t1 = ripple_phase / 4u, t2 = ripple_phase / 6u;
+    uint32_t x, y, phase = fm1_ms / POND_TICK_MS;
     rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
-    cv_begin(240, POND_H * 10u, C_BLACK);
+    cv_begin(POND_W * CELL_PX, POND_H * CELL_PX, C_BLACK);
     for (y = 0; y < POND_H; y++)                  /* the water: one continuous field of two slow crossing waves */
         for (x = 0; x < POND_W; x++) {
-            uint32_t shimmer = (tri8(x * 2u + y + t1) + tri8(y * 3u + x * 2u + t2 * 2u)) / 2u;   /* 0..7 */
-            rgb_t c = shimmer_rgb(water, shimmer);
-            cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
-                    RGB(c.r, c.g, c.b));
+            rgb_t c = shimmer_rgb(water, water_shimmer(x, y, phase));   /* shimmer 0..7 */
+            cv_rect((int32_t)(x * CELL_PX), (int32_t)(y * CELL_PX), CELL_PX, CELL_PX, RGB(c.r, c.g, c.b));
         }
     for (y = 0; y < POND_H; y++)                  /* the pads on top: nearly stationary, each with a tiny random wander */
         for (x = 0; x < POND_W; x++) {
             rgb_t c;
-            int32_t px, py;
             if (cell_kind(x, y) != CELL_PAD) continue;
-            c = pad_i < active_n ? shimmer_rgb(bloom, tri8(x + y + t1)) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
-            pad_i++;
-            px = (int32_t)(x * 10u) + pad_jitter(x, y, 0u);
-            py = (int32_t)(y * 10u) + pad_jitter(x, y, 1u);
-            if (px < 0) px = 0;
-            if (py < 0) py = 0;
-            if (px > 230) px = 230;
-            if (py > (int32_t)(POND_H * 10u) - 10) py = (int32_t)(POND_H * 10u) - 10;
-            cv_rect(px, py, 10, 10,
-                    RGB(c.r, c.g, c.b));
+            c = pad_blooms(x, y, set.density) ? shimmer_rgb(bloom, tri8(x + y + phase / 4u)) : pad_leaf_rgb(x, y);   /* leaves: scene.h's two greens */
+            cv_rect(pad_pos(x, y, phase, 0u), pad_pos(x, y, phase, 1u), CELL_PX, CELL_PX, RGB(c.r, c.g, c.b));
         }
     cv_blit(0, POND_Y);
-    ripple_phase += 1u;  /* slow, constant motion: a meditative pond independent of controls */
 }
 
 static void draw_chrome(void)                   /* once, at startup only: the black screen and the title never
@@ -325,27 +293,11 @@ static void draw_chrome(void)                   /* once, at startup only: the bl
 static void draw_status(void)                   /* only on a real settings/chord change, not every pond tick */
 {
     char s[32], k[32];
-    uint32_t i = 0, j = 0;
-    const char *p = SCALE_NAME[set.scale];
-    while (*p) s[i++] = *p++;
-    s[i++] = ' '; s[i++] = ' ';
-    p = set.drone_on ? "DRONE ON" : "DRONE OFF";
-    while (*p) s[i++] = *p++;
-    s[i++] = ' '; s[i++] = ' ';
-    s[i++] = 'D'; s[i++] = (char)('0' + set.density);   /* ENC_ALGORITHM */
-    s[i] = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, s, C_WHITE, 1);
-    /* the knob rows, in the knobs' order, top to bottom and left to right: ENC_KNOB1 drift, ENC_KNOB2 colour,
-       then ENC_KNOB3 and ENC_KNOB4, which are not built yet and show "--" */
-    k[j++] = 'D'; k[j++] = 'R'; k[j++] = 'I'; k[j++] = 'F'; k[j++] = 'T'; k[j++] = ' ';
-    k[j++] = (char)('0' + set.drift);
-    k[j++] = ' '; k[j++] = ' ';
-    k[j++] = 'C'; k[j++] = 'O'; k[j++] = 'L'; k[j++] = 'O'; k[j++] = 'U'; k[j++] = 'R'; k[j++] = ' ';
-    if (set.color >= 10u) k[j++] = (char)('0' + set.color / 10u);
-    k[j++] = (char)('0' + set.color % 10u);
-    k[j] = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 26u, 240, &FONT_S, k, C_OFF, 1);
-    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, "VOICE --  SLEEP --", C_OFF, 1);
+    status_top(s, set.scale, set.drone_on, set.density);                 /* the scale, drone and density */
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 6u, 240, &FONT_S, s, C_WHITE, 1);
+    status_knobs(k, set.drift, set.color);                               /* ENC_KNOB1 drift, ENC_KNOB2 colour */
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 26u, 240, &FONT_S, k, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 46u, 240, &FONT_S, "VOICE --  SLEEP --", C_OFF, 1);
 }
 
 #if ISR_TIMING && !defined(DINGHY_HOST)
@@ -357,7 +309,7 @@ static void draw_isr_time(void)                 /* worst app_audio block so far,
     if (t >= 100u) s[i++] = (char)('0' + t / 100u % 10u);
     s[i++] = (char)('0' + t / 10u % 10u); s[i++] = '.'; s[i++] = (char)('0' + t % 10u);
     s[i++] = ' '; s[i++] = 'M'; s[i++] = 'S'; s[i] = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, s, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 46u, 240, &FONT_S, s, C_OFF, 1);
 }
 #else
 static void draw_isr_time(void) {}
@@ -372,7 +324,7 @@ static void draw_seed(void)                     /* the boot seed in hex, on draw
     s[0] = 'S'; s[1] = 'E'; s[2] = 'E'; s[3] = 'D'; s[4] = ' ';
     for (k = 0; k < 8u; k++) s[5u + k] = HEX[boot_seed >> (28u - 4u * k) & 15u];
     s[13] = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, s, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 46u, 240, &FONT_S, s, C_OFF, 1);
 }
 #else
 static void draw_seed(void) {}
@@ -401,7 +353,6 @@ static void app_main(void)
     }
 #endif
     filter_k = color_to_filter_k(set.color);
-    init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
     {   /* initialize per-voice note timers: drone re-roots slowly, colour voices trigger freely */
@@ -416,7 +367,7 @@ static void app_main(void)
     scale_drawn = set.scale;
     state_drawn = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
                   set.scale << 13u;
-    next_draw_ms = fm1_ms + 300u;                 /* the pond's shimmer redraws on its own slow tick too */
+    next_draw_ms = fm1_ms + POND_TICK_MS;                 /* the pond's shimmer redraws on its own slow tick too */
 
     {   /* backlight every button (the FM-1's 14 are ids 0..13; a no-op on the SMK-37). The glow is its own dim layer
            and an LED takes the brightest layer (hal/fm1_input.h), so BTN_ARP/BTN_PLAY's lit state still reads
@@ -512,13 +463,13 @@ static void app_main(void)
             state_drawn = st;
             draw_pond();
             draw_status();
-            next_draw_ms = fm1_ms + 300u;
+            next_draw_ms = fm1_ms + POND_TICK_MS;
         } else if ((int32_t)(fm1_ms - next_draw_ms) >= 0) {   /* just the pond's own slow shimmer tick --
                                                                    the title and status text never change here */
             draw_pond();
             draw_isr_time();
             draw_seed();
-            next_draw_ms = fm1_ms + 300u;
+            next_draw_ms = fm1_ms + POND_TICK_MS;
         }
 
         /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md), but this is an

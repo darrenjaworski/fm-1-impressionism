@@ -69,19 +69,8 @@ static rgb_t chord_templ_to_bloom_rgb(uint32_t templ)
     return c;
 }
 
-/* ENC_ALGORITHM (density), 0..3 -> how many of the pond's "pad" cells read as active/lit (purple blooms), out of
-   some total. Sparsest density blooms the most pads, so the densest setting leaves more green lilies showing:
-   about three-quarters at density 0, down to an eighth at density 3 (never zero: a totally dark pond reads as
-   dead, not sparse). Tune by eye once this is on the real screen. */
-static uint32_t active_cell_count(uint32_t density, uint32_t total)
-{
-    static const uint32_t EIGHTHS[4] = { 6u, 4u, 2u, 1u };   /* 3/4, 1/2, 1/4, 1/8 of total */
-    uint32_t n = total * EIGHTHS[density] / 8u;
-    return n < 1u ? 1u : n;
-}
-
-/* a travelling shimmer on a colour: shimmer 0..7 scales it from 80/115 to 115/115 of its brightness (water and
-   active blooms both ripple with this, so the purple moves with the pond) */
+/* a travelling shimmer on a colour: shimmer 0..7 scales it from 80/115 to 115/115 of its brightness (the water
+   and the blooms both use this, so the purple moves with the pond) */
 static rgb_t shimmer_rgb(rgb_t c, uint32_t shimmer)
 {
     uint32_t k = 80u + shimmer * 5u;
@@ -98,6 +87,7 @@ static rgb_t shimmer_rgb(rgb_t c, uint32_t shimmer)
                         240x64 (not gfx.c's unused 240x124 fallback -- platform.c defines it first); this needs
                         impressionism.c to raise CV_MAX to 240x120 before #include "platform.c" (it does). The
                         rest of the 240 px screen is the title and the status-text overlay (impressionism.c). */
+#define CELL_PX 10u  /* one cell, square: POND_W x POND_H cells make the pond */
 enum { CELL_WATER = 0, CELL_PAD = 1 };
 
 static uint32_t cell_hash(uint32_t x, uint32_t y)   /* a cheap 2D hash: deterministic, no table, no state */
@@ -108,7 +98,7 @@ static uint32_t cell_hash(uint32_t x, uint32_t y)   /* a cheap 2D hash: determin
 }
 static uint32_t cell_kind(uint32_t x, uint32_t y)
 {
-    return (cell_hash(x, y) % 100u) < 22u ? CELL_PAD : CELL_WATER;   /* ~22% pads: tune by eye on real hardware */
+    return (cell_hash(x, y) % 100u) < 22u ? CELL_PAD : CELL_WATER;   /* 60 of 288 cells are pads (21%, measured): tune by eye on real hardware */
 }
 
 /* a PAD cell's leaf colour: one of the painting's two greens, picked per cell (fixed, like cell_kind -- the
@@ -118,4 +108,41 @@ static rgb_t pad_leaf_rgb(uint32_t x, uint32_t y)
     rgb_t dark = { MONET_LEAF_DARK_R, MONET_LEAF_DARK_G, MONET_LEAF_DARK_B };
     rgb_t light = { MONET_LEAF_LIGHT_R, MONET_LEAF_LIGHT_G, MONET_LEAF_LIGHT_B };
     return (cell_hash(x, y) >> 3 & 1u) ? light : dark;   /* a different bit than cell_kind's %100 uses */
+}
+
+/* a triangle wave, period 16: 0 up to 7 and back down to 0, so neighbouring values differ by at most 1 */
+static uint32_t tri8(uint32_t v)
+{
+    v &= 15u;
+    return v < 8u ? v : 15u - v;
+}
+
+/* the water's shimmer at one cell, 0..7: two slow waves crossing the pond. phase is fm1_ms / POND_TICK_MS
+   (impressionism.c), so the motion follows the clock and never how often the pond is redrawn */
+static uint32_t water_shimmer(uint32_t x, uint32_t y, uint32_t phase)
+{
+    uint32_t t1 = phase / 4u, t2 = phase / 6u;
+    return (tri8(x * 2u + y + t1) + tri8(y * 3u + x * 2u + t2 * 2u)) / 2u;
+}
+
+/* a pad's top-left pixel on one axis (0 = x, 1 = y): its cell's corner, moved by a hash offset of -2..+2 px that
+   changes every 12 phase ticks (about 3.6 s at 300 ms a tick), then kept inside the pond so the whole 10 px pad
+   stays on screen */
+static int32_t pad_pos(uint32_t x, uint32_t y, uint32_t phase, uint32_t axis)
+{
+    int32_t p = (int32_t)((axis ? y : x) * CELL_PX) + (int32_t)(cell_hash(x + axis * 977u, y + phase / 12u) % 5u) - 2;
+    int32_t hi = (int32_t)((axis ? POND_H : POND_W) * CELL_PX) - (int32_t)CELL_PX;
+    if (p < 0) p = 0;
+    if (p > hi) p = hi;
+    return p;
+}
+
+/* whether a pad cell blooms (is lit purple) at this density, 0..3. Each cell has a fixed value 0..7 from bits 8..10
+   of its hash, so it is independent of the bits cell_kind and pad_leaf_rgb use. It blooms when that value is below
+   EIGHTHS[density] = 6, 4, 2 or 1: six-eighths of the pads at density 0 down to one-eighth at density 3. Nested:
+   a pad that blooms at a denser setting blooms at every sparser one. The caller only asks this for pad cells. */
+static uint32_t pad_blooms(uint32_t x, uint32_t y, uint32_t density)
+{
+    static const uint32_t EIGHTHS[4] = { 6u, 4u, 2u, 1u };
+    return ((cell_hash(x, y) >> 8) & 7u) < EIGHTHS[density];
 }

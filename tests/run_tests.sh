@@ -34,7 +34,9 @@ run "SMK-37 pitch wheel: the bend is back to 0 at rest, however slowly the wheel
 $CC -o "$OUT/planing_test" tests/planing_test.c
 run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
 $CC -o "$OUT/scene_test" tests/scene_test.c
-run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
+run "the reactive lily-pond screen's pure logic: water colour, bloom palette, bloom density, pad wander, water shimmer, layout" "$OUT/scene_test"
+$CC -o "$OUT/status_test" tests/status_test.c
+run "the status-text overlay's pure logic: every scale, drone, density and knob line fits the 240 px row" "$OUT/status_test"
 $CC -o "$OUT/reverb_test" tests/reverb_test.c
 run "Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, deterministic, bounded" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c

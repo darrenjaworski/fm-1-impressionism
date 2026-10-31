@@ -86,7 +86,7 @@ What the music drives (v1), and what it deliberately does not:
 | ------------------------------------- | -------------------------------------------------------------------------- |
 | `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)     |
 | a chord-change event                  | lily-pad bloom colour shift, at that instant                               |
-| `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple: sparsest blooms most, densest leaves more green lilies |
+| `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple: ~3/4 at density 0, 1/8 at density 3 (fewer green lilies) |
 | nothing (always on)                   | the water's flow, the pads' tiny wander                                    |
 | nothing (by design)                   | `BTN_ARP`, `ENC_KNOB1` (drift) and every other control never move the pond |
 
