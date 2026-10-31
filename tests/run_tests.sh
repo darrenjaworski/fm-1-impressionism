@@ -37,6 +37,8 @@ $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
 $CC -o "$OUT/diffuse_test" tests/diffuse_test.c
 run "the cheap diffuser's pure logic: a feed-forward multi-tap delay" "$OUT/diffuse_test"
+$CC -o "$OUT/reverb_test" tests/reverb_test.c
+run "Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s, stereo, deterministic" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
 run "voice envelope: attack, exponential release, quiet threshold, T60" "$OUT/envelope_test"
 run "the release pipeline's version bump (tools/next_version.py), incl. two real bugs it already caught once" python3 tests/next_version_test.py

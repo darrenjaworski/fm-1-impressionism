@@ -40,7 +40,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
-#include "diffuse.h"                            /* the cheap multi-tap diffuser (dreamier space) */
+#include "reverb.h"                             /* Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s */
 
 #ifndef ISR_TIMING
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
@@ -64,11 +64,10 @@ static struct {
 #define RELEASE_STEP 5                          /* ~9.4 s, GATE_FULL -> 0 (slower fade-out) */
 
 #ifdef DINGHY_HOST
-static int16_t diff_buf[DIFF_LEN];              /* host build: plain memory (the .pool section is ELF-only, see gfx.c) */
+static reverb_t reverb;                         /* host build: plain memory (the .pool section is ELF-only) */
 #else
-static int16_t diff_buf[DIFF_LEN] __attribute__((section(".pool")));
+static reverb_t reverb __attribute__((section(".pool")));  /* ~15 KB of the .pool section (336 KB available) */
 #endif
-static uint32_t diff_pos;                       /* audio ISR only */
 #if ISR_TIMING && !defined(DINGHY_HOST)
 static volatile uint32_t isr_max_ticks;         /* worst app_audio time seen, in fm1_ticks() */
 #endif
@@ -109,12 +108,13 @@ static void app_audio(int32_t *out, uint32_t n)
         voice[v].ph = ph;
         voice[v].ph_detune = ph_d;
     }
-    /* the space: a feed-forward multi-tap diffuser on the mono sum, returned into L and R (diffuse.h) */
+    /* the space: Schroeder reverb on the mono sum (4 combs + 2 allpasses, T60 ~7s) */
     for (i = 0; i < n; i++) {
-        int32_t wl, wr;
-        diffuse_step(diff_buf, &diff_pos, (out[2u * i] + out[2u * i + 1u]) >> 1, &wl, &wr);
-        out[2u * i] += wl;
-        out[2u * i + 1u] += wr;
+        int16_t wl, wr;
+        int32_t mono = (out[2u * i] + out[2u * i + 1u]) >> 1;
+        reverb_step(&reverb, mono, &wl, &wr);
+        out[2u * i] += (int32_t)wl;
+        out[2u * i + 1u] += (int32_t)wr;
     }
     /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula */
     for (i = 0; i < n; i++) {
@@ -305,6 +305,7 @@ static void app_main(void)
         set_defaults();
     filter_k = color_to_filter_k(set.color);
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
+    reverb_init(&reverb);                        /* zero the reverb buffers */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
     {   /* initialize per-voice note timers: drone re-roots slowly, colour voices trigger freely */
