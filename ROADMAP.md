@@ -76,7 +76,6 @@ Reactive mapping (v1):
 | a chord-change event                  | lily-pad bloom color shift, at that instant                                                   |
 | Constant (independent of controls)    | slow meditative water-ripple (constant 1 step/frame) + lily pad Brownian motion (±2 px drift) |
 | `ENC_ALGORITHM` (density), continuous | how many lily pads look "active" at once                                                      |
-| `BTN_ARP` (drone on/off)              | overall brightness shift (off = cooler, dimmer pond)                                          |
 
 ## Deferred to later versions
 

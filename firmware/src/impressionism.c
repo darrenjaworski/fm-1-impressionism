@@ -25,7 +25,7 @@
  *
  * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
  * lily blooms coloured by the current chord template (and rippling with the water), a slow constant shimmer and a
- * small brownian drift of the pads that ignore the panel, how many pads look "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
+ * small brownian drift of the pads that ignore the panel, and how many pads look "active" from density -- plus a small status-text overlay below it
  * (the scale name, drone state, D/R).
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
@@ -274,7 +274,6 @@ static int32_t pad_jitter(uint32_t x, uint32_t y, uint32_t axis)
 static void draw_pond(void)
 {
     uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
-    uint32_t dim = set.drone_on ? 100u : 65u;    /* drone off: a cooler, dimmer pond (ROADMAP.md) */
     uint32_t t1 = ripple_phase / 4u, t2 = ripple_phase / 6u;
     rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
     cv_begin(240, POND_H * 10u, C_BLACK);
@@ -283,7 +282,7 @@ static void draw_pond(void)
             uint32_t shimmer = (tri8(x * 2u + y + t1) + tri8(y * 3u + x * 2u + t2 * 2u)) / 2u;   /* 0..7 */
             rgb_t c = shimmer_rgb(water, shimmer);
             cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
-                    RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
+                    RGB(c.r, c.g, c.b));
         }
     for (y = 0; y < POND_H; y++)                  /* the pads on top: nearly stationary, each with a tiny random wander */
         for (x = 0; x < POND_W; x++) {
@@ -299,7 +298,7 @@ static void draw_pond(void)
             if (px > 230) px = 230;
             if (py > (int32_t)(POND_H * 10u) - 10) py = (int32_t)(POND_H * 10u) - 10;
             cv_rect(px, py, 10, 10,
-                    RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
+                    RGB(c.r, c.g, c.b));
         }
     cv_blit(0, POND_Y);
     ripple_phase += 1u;  /* slow, constant motion: a meditative pond independent of controls */
