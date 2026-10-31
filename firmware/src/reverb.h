@@ -28,59 +28,59 @@ static inline void reverb_step(reverb_t *r, int32_t in, int16_t *out_l, int16_t 
 {
     in >>= 2;  /* attenuate input */
 
-    /* Comb 1 */
-    int32_t c1 = (int32_t)r->buf1[r->pos1];
-    int32_t d1 = (c1 * 127 + r->damp1) >> 7;
-    r->damp1 = d1;
-    int32_t fb1 = in + ((d1 * 32767) >> 15);
-    r->buf1[r->pos1] = (int16_t)(fb1 > 32767 ? 32767 : fb1 < -32767 ? -32767 : fb1);
+    /* Comb 1: read delayed sample, apply damping, add input, write back, output */
+    int32_t c1_rd = (int32_t)r->buf1[r->pos1];
+    int32_t c1_damp = ((c1_rd * 63) >> 7) + ((r->damp1 * 64) >> 7);  /* damp: 0.5 * delayed + 0.5 * state */
+    r->damp1 = c1_damp;
+    int32_t c1_new = in + ((c1_damp * 960) >> 10);  /* feedback gain ~0.938 for T60 ~7s */
+    r->buf1[r->pos1] = (int16_t)(c1_new > 32767 ? 32767 : c1_new < -32767 ? -32767 : c1_new);
     r->pos1 = (r->pos1 + 1) % COMB1_DELAY;
 
     /* Comb 2 */
-    int32_t c2 = (int32_t)r->buf2[r->pos2];
-    int32_t d2 = (c2 * 127 + r->damp2) >> 7;
-    r->damp2 = d2;
-    int32_t fb2 = in + ((d2 * 32767) >> 15);
-    r->buf2[r->pos2] = (int16_t)(fb2 > 32767 ? 32767 : fb2 < -32767 ? -32767 : fb2);
+    int32_t c2_rd = (int32_t)r->buf2[r->pos2];
+    int32_t c2_damp = ((c2_rd * 63) >> 7) + ((r->damp2 * 64) >> 7);
+    r->damp2 = c2_damp;
+    int32_t c2_new = in + ((c2_damp * 960) >> 10);
+    r->buf2[r->pos2] = (int16_t)(c2_new > 32767 ? 32767 : c2_new < -32767 ? -32767 : c2_new);
     r->pos2 = (r->pos2 + 1) % COMB2_DELAY;
 
     /* Comb 3 */
-    int32_t c3 = (int32_t)r->buf3[r->pos3];
-    int32_t d3 = (c3 * 127 + r->damp3) >> 7;
-    r->damp3 = d3;
-    int32_t fb3 = in + ((d3 * 32767) >> 15);
-    r->buf3[r->pos3] = (int16_t)(fb3 > 32767 ? 32767 : fb3 < -32767 ? -32767 : fb3);
+    int32_t c3_rd = (int32_t)r->buf3[r->pos3];
+    int32_t c3_damp = ((c3_rd * 63) >> 7) + ((r->damp3 * 64) >> 7);
+    r->damp3 = c3_damp;
+    int32_t c3_new = in + ((c3_damp * 960) >> 10);
+    r->buf3[r->pos3] = (int16_t)(c3_new > 32767 ? 32767 : c3_new < -32767 ? -32767 : c3_new);
     r->pos3 = (r->pos3 + 1) % COMB3_DELAY;
 
     /* Comb 4 */
-    int32_t c4 = (int32_t)r->buf4[r->pos4];
-    int32_t d4 = (c4 * 127 + r->damp4) >> 7;
-    r->damp4 = d4;
-    int32_t fb4 = in + ((d4 * 32767) >> 15);
-    r->buf4[r->pos4] = (int16_t)(fb4 > 32767 ? 32767 : fb4 < -32767 ? -32767 : fb4);
+    int32_t c4_rd = (int32_t)r->buf4[r->pos4];
+    int32_t c4_damp = ((c4_rd * 63) >> 7) + ((r->damp4 * 64) >> 7);
+    r->damp4 = c4_damp;
+    int32_t c4_new = in + ((c4_damp * 960) >> 10);
+    r->buf4[r->pos4] = (int16_t)(c4_new > 32767 ? 32767 : c4_new < -32767 ? -32767 : c4_new);
     r->pos4 = (r->pos4 + 1) % COMB4_DELAY;
 
-    /* Sum combs */
-    int32_t comb_sum = (d1 + d2 + d3 + d4) >> 2;
+    /* Sum comb outputs */
+    int32_t comb_sum = (c1_damp + c2_damp + c3_damp + c4_damp) >> 2;
 
     /* Allpass 1 */
-    int32_t ap1_in = (int32_t)r->ap1[r->ap1_pos];
-    int32_t ap1_out = ap1_in + ((comb_sum - ap1_in) >> 1);
+    int32_t ap1_rd = (int32_t)r->ap1[r->ap1_pos];
+    int32_t ap1_out = ap1_rd + ((comb_sum - ap1_rd) >> 1);
     r->ap1[r->ap1_pos] = (int16_t)(ap1_out > 32767 ? 32767 : ap1_out < -32767 ? -32767 : ap1_out);
     r->ap1_pos = (r->ap1_pos + 1) % ALLPASS1_DELAY;
 
     /* Allpass 2 */
-    int32_t ap2_in = (int32_t)r->ap2[r->ap2_pos];
-    int32_t ap2_out = ap2_in + ((ap1_out - ap2_in) >> 1);
+    int32_t ap2_rd = (int32_t)r->ap2[r->ap2_pos];
+    int32_t ap2_out = ap2_rd + ((ap1_out - ap2_rd) >> 1);
     r->ap2[r->ap2_pos] = (int16_t)(ap2_out > 32767 ? 32767 : ap2_out < -32767 ? -32767 : ap2_out);
     r->ap2_pos = (r->ap2_pos + 1) % ALLPASS2_DELAY;
 
-    /* Stereo: mix different combs for width */
-    int32_t l = (ap2_out + d1 + d3) >> 2;
-    int32_t r_out = (ap2_out + d2 + d4) >> 2;
+    /* Stereo out: mix different combs for L/R width */
+    int32_t l = (ap2_out + c1_damp + c3_damp) >> 2;
+    int32_t r_out = (ap2_out + c2_damp + c4_damp) >> 2;
 
-    *out_l = (int16_t)(l > 12000 ? 12000 : l < -12000 ? -12000 : l);
-    *out_r = (int16_t)(r_out > 12000 ? 12000 : r_out < -12000 ? -12000 : r_out);
+    *out_l = (int16_t)(l > 10000 ? 10000 : l < -10000 ? -10000 : l);
+    *out_r = (int16_t)(r_out > 10000 ? 10000 : r_out < -10000 ? -10000 : r_out);
 }
 
 #endif
