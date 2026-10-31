@@ -1,5 +1,5 @@
 {
-  "note": "This project's own single-firmware catalog for the vendored fm1-emu page (.github/workflows/pages.yml) -- not auto-synced to the release version, update by hand if it goes stale. \"package\" is filled in at build time with this repo's latest release asset, published alongside this file as impressionism.fwsc (a stable name across releases).",
+  "note": "This project's single-firmware catalog for the fm1-emu page (.github/workflows/pages.yml). The version field is injected at build time from the current release tag. \"package\" points to the latest release asset, published with a stable name across releases.",
   "default": "impressionism",
   "firmwares": [
     {
