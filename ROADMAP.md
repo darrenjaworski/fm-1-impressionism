@@ -143,9 +143,56 @@ are short of target.
 
 ### Control and interface
 
-- **Key selection**: any of the 27 keys (F3–G5) sets the drone root, a macro control (not note-by-note performance). Overrides the random walk; the drone stays there until another key is pressed or a timer re-randomizes it. Fits the mission and opens live performance options.
-- **Presets**: save/recall 4 named "moods" (scale, density, drift, color, drone-on) to slots. Quick A/B testing without the SAVE button ceremony.
-- **Sleep timer**: `ENC_KNOB2` long-press enters a "sleep" mode: fade to silence over N minutes (5/15/30/60 or off). Fits "sits on a shelf and drifts"; useful as a night lamp.
+v1 uses 4 of the panel's 7 encoders (`ENC_SELECT`, `ENC_ALGORITHM`, `ENC_KNOB1`, `ENC_KNOB2`) and 1 of 14 buttons
+(`BTN_ARP`; `BTN_PLAY` is pause/resume, done above). `ENC_KNOB3`, `ENC_KNOB4` and `ENC_PRESETS` (docs/API.md) are
+unused hardware, as is the entire 27-key keybed. Proposed assignment for the rest, thought through in a
+2026-10-31 session:
+
+- **`ENC_SELECT` (upgrade from toggle to cycle)**: `set.scale = (set.scale + 1) % SCALE_COUNT` instead of
+  `^= 1u`, once the scale table grows past 2 entries (see Chord and scale expansion above). No new control,
+  no new concept — falls out of the scale-table work for free. The status-text overlay needs 6 scale names
+  instead of 2.
+- **`ENC_ALGORITHM`**: unchanged — stays density (how often voices retrigger).
+- **`ENC_KNOB3` — voice-leading / chord-motion amount**: weights how `plan_next()` (`planing.h`) picks the
+  next chord template. At 0, pure random walk (today's behaviour); at 3, bias toward whichever remaining
+  template shares the most absolute pitches with the outgoing chord. Mechanically: compute each candidate's
+  resolved semitones, count overlaps with the current chord, weight the random pick by overlap count scaled
+  by the knob. Pure main-loop logic (replans fire every few seconds, not per sample) — no ISR cost, testable
+  in `tests/planing_test.c` without touching audio. This is the concrete implementation of the mission's
+  "common-tone voice leading", which v1 only does as an unweighted random walk.
+- **`ENC_KNOB4` — reverb size/tail, OR sleep timer. Open fork, needs a decision:**
+  - *Reverb size*: the comb/feedback delay lines (`reverb.h`) are fixed-length buffers, so true resizing
+    isn't possible at runtime — the practical version is a feedback/damping knob instead, scaling the
+    `960/1024` feedback coefficient in `comb_step()` between roughly 700/1024 (short, tight) and 1000/1024
+    (long, washy). Real per-sample ISR change (near-free multiply-add, but still changes the measured
+    worst-case block time) — gated on the ISR re-measurement above.
+  - *Sleep timer*: long-press cycles 5/15/30/60/off minutes; on expiry, fade `filter_k` and all voice gates
+    to 0 over the same ~45 ms curve `BTN_PLAY`'s pause already uses, then freeze timers. Main-loop only
+    (a counter compared against `fm1_ms`) — zero ISR risk, ships without waiting on any measurement.
+  - Reverb size is the better *sound* feature; sleep timer is lower-risk and fits "sits on a shelf" more
+    literally. They don't have to compete for the same knob if `ENC_KNOB4` takes one and a long-press on a
+    different control (e.g. `ENC_PRESETS`) takes the other — needs a call before implementing either.
+- **`ENC_PRESETS` — step through 4 saved "moods"**: turning it increments/decrements a `preset_index` (0–3)
+  and immediately loads that slot's `{scale, density, drift, color, drone_on}` into `set` (today's single-slot
+  struct, same shape, stored 4× instead of once). Uses 4 of the platform's existing 8 flash slots (`store.h`),
+  each far bigger than the ~5-byte struct needs, but that's the HAL's granularity. Turning the encoder loads
+  instantly; it doesn't save.
+- **`BTN_SAVE` — commit current settings into the selected preset slot**: pairs with `ENC_PRESETS` above.
+  Writes the live `set` struct into whichever slot the encoder is pointing at, reusing the existing
+  dirty-flag/2-second-debounce flash-write path (`settings_save`) parameterised by slot index. A brief LED
+  flash on `BTN_SAVE` confirms the write (flash erases are ~50 ms, felt not instant — `docs/RULES.md`).
+- **Key selection (any of the 27 keys, F3–G5) — sets the drone root**: on a key-down edge
+  (`fm1_input_note_edges()`), find the scale degree whose resolved pitch is nearest that key (keys don't all
+  land exactly on scale degrees — e.g. a whole-tone scale skips half the keyboard), set `home_degree`
+  accordingly, and call `reroot()` immediately instead of waiting for `next_root_ms`. The only proposal that
+  touches the keybed, which v1 reads nowhere in `app_main()`. Still a macro control (press once, done), not
+  note-by-note performance — consistent with the mission's "not a played-note synth".
+- **No tempo/BPM control, by design**: checked for any existing tempo/clock concept in the codebase — none
+  exists (no `tempo`, `bpm`, or `clock_` anywhere). This is deliberate, not a gap: the mission is explicitly
+  "no hard clock-quantized sequencer", and density/drift already cover "how often" and "how far" without a
+  shared clock tying voices together. The platform can see incoming MIDI clock bytes (`midi_get()`), but v1
+  ignores all MIDI-in by design. A future "sync density to incoming MIDI clock" toggle would be a deliberate,
+  narrow exception to "no clock" — not assumed here, flagged only if wanted later.
 
 ### Sound and measurement
 
