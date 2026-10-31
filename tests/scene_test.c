@@ -56,14 +56,6 @@ int main(void)
         check(c3 <= total, "never more active cells than exist");
     }
 
-    /* Seam H: ripple phase step (ENC_KNOB1, drift rate 0..3) -> how far the water's ripple phase advances each
-       screen tick. Monotonic; 0 still moves (a perfectly frozen pond doesn't read as "slow", it reads as off). */
-    {
-        uint32_t s0 = ripple_step(0u), s1 = ripple_step(1u), s2 = ripple_step(2u), s3 = ripple_step(3u);
-        check(s0 >= 1u, "drift_rate 0 still ripples, just slowly");
-        check(s0 < s1 && s1 < s2 && s2 < s3, "ripple speed rises strictly with drift rate");
-    }
-
     /* Seam I: the pond's fixed layout. A deterministic hashed pattern generated once, not re-randomised every
        frame (it's the composition, not the reactive part) -- so the same cell is always the same kind, and the
        grid reads as a plausible lily pond: not all water, not all pads, roughly a tenth to a third pads. */

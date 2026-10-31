@@ -279,7 +279,7 @@ static void draw_pond(void)
                     RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
         }
     cv_blit(0, POND_Y);
-    ripple_phase += ripple_step(set.drift);
+    ripple_phase += 1u;  /* slow, constant ripple: a meditative shimmer independent of controls */
 }
 
 static void draw_chrome(void)                   /* once, at startup only: the black screen and the title never

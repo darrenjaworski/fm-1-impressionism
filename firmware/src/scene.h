@@ -79,14 +79,6 @@ static uint32_t active_cell_count(uint32_t density, uint32_t total)
     return n < 1u ? 1u : n;
 }
 
-/* ENC_KNOB1 (drift rate), 0..3 -> the water's ripple phase step per screen tick (an arbitrary small unit; what
-   matters is the ordering and that it's never 0). Reduced values to decrease visual churn. */
-static uint32_t ripple_step(uint32_t drift_rate)
-{
-    static const uint32_t STEP[4] = { 1u, 2u, 3u, 4u };
-    return STEP[drift_rate];
-}
-
 /* a travelling shimmer on a colour: shimmer 0..7 scales it from 80/115 to 115/115 of its brightness (water and
    active blooms both ripple with this, so the purple moves with the pond) */
 static rgb_t shimmer_rgb(rgb_t c, uint32_t shimmer)
