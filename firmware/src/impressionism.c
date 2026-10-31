@@ -17,7 +17,7 @@
  *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
  *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
  *   BTN_ARP        drone on/off
- *   BTN_PLAY       pause/resume generation (the current chord keeps sustaining; timers resume where they stopped)
+ *   BTN_PLAY       pause/resume: silences all voices and freezes every timer; resume restarts them where they stopped
  *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it

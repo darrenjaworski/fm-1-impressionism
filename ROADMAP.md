@@ -94,7 +94,7 @@ Everything in the mission not covered above, to add incrementally:
 
 Three items from an earlier session's roadmap, scoped and implemented:
 
-**Dreamier default character** ✅ — Detuned partials (~5% frequency shift) per voice for richer, more resonant tone.
+**Dreamier default character** ✅ — Detuned partials (+1/256, about 7 cents, a chorus shimmer) per voice for richer, more resonant tone.
 Slower envelopes (attack 5.8s, release 9.4s) for sustained character. Sparser defaults: density=0, drift=0,
 color=12 (was 1, 1, 16) for less churning, slower drift, darker tone. Reference was Mutable Instruments
 Rings (resonance) + Clouds (diffusion) — this achieves the resonance via partials; diffusion deferred (slower
@@ -104,10 +104,10 @@ envelopes + lower defaults already deliver the "floating" quality). Commit: `36a
 ENV, LFO, EDIT, GLO, HOME, SAVE, SEQ, PLAY, REC. BTN_ARP retains full brightness as drone state indicator.
 Visual polish matching the soft-focus ambient aesthetic. Commit: `1184ac4`.
 
-**`BTN_PLAY` pause/resume** ✅ — Pressing BTN_PLAY toggles a pause state that freezes re-planning and re-rooting
-timers, allowing the current chord to sustain indefinitely while paused. Semantics: "pause" = suspend generation,
-not mute (natural for ambient drift). Current chord keeps playing but does not evolve until resume. BTN_PLAY LED
-shows state: lit=generating, off=paused. Commit: `9a8d93d`.
+**`BTN_PLAY` pause/resume** ✅ — Pressing BTN_PLAY toggles a pause state that freezes every timer (re-plan, re-root,
+and each colour voice's note timer) and silences all voices at once, so pause is an instant stop. Resume restarts the
+timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused. (A 30 ms fade in place of the
+instant silence was planned but is not built yet.)
 
 ## An online playable version on this repo's GitHub Pages — done (2026-10-30)
 
