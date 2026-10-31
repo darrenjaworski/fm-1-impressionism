@@ -54,7 +54,9 @@ static struct {
     int32_t amp;                                /* the level now: glides to gate, no clicks */
     uint32_t ph;
     uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
+    uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
 } voice[NV];
+static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 
 /* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
@@ -91,8 +93,14 @@ static void app_audio(int32_t *out, uint32_t n)
     uint32_t t_start = fm1_ticks();
 #endif
     for (v = 0; v < NV; v++) {
-        uint32_t ph = voice[v].ph, step = voice[v].inc;
-        uint32_t ph_d = voice[v].ph_detune, step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
+        uint32_t ph = voice[v].ph, step;
+        uint32_t ph_d, step_d;
+        int32_t drift;
+        voice[v].lfo_ph += lfo_inc[v];
+        drift = ((int32_t)(voice[v].inc >> 10) * sine(voice[v].lfo_ph)) >> 12;
+        step = voice[v].inc + (uint32_t)drift;
+        ph_d = voice[v].ph_detune;
+        step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
         int32_t amp = voice[v].amp, g = voice[v].gate;
         if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }        /* once per block, not per sample */
         else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
@@ -158,7 +166,7 @@ static int32_t left_note_ms[NV];                 /* per-voice timer state when p
 
 static void retune_voices(uint32_t scale)
 {
-    int32_t root_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree);
+    int32_t root_note = (int32_t)ROOT_BASE_NOTE - 12 + scale_degree_to_semitone(scale, home_degree);  /* drone: an octave below the chord */
     int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
     uint32_t v;
     voice[0].inc = note_to_inc(root_note);
