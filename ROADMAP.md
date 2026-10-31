@@ -105,9 +105,8 @@ ENV, LFO, EDIT, GLO, HOME, SAVE, SEQ, PLAY, REC. BTN_ARP retains full brightness
 Visual polish matching the soft-focus ambient aesthetic. Commit: `1184ac4`.
 
 **`BTN_PLAY` pause/resume** ✅ — Pressing BTN_PLAY toggles a pause state that freezes every timer (re-plan, re-root,
-and each colour voice's note timer) and silences all voices at once, so pause is an instant stop. Resume restarts the
-timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused. (A 30 ms fade in place of the
-instant silence was planned but is not built yet.)
+and each colour voice's note timer) and fades all voices to silence over about 45 ms (the reverb tail rings out after that). Resume restarts the
+timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused.
 
 ## An online playable version on this repo's GitHub Pages — done (2026-10-30)
 

@@ -17,7 +17,7 @@
  *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
  *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
  *   BTN_ARP        drone on/off
- *   BTN_PLAY       pause/resume: silences all voices and freezes every timer; resume restarts them where they stopped
+ *   BTN_PLAY       pause/resume: fades all voices out (~45 ms) and freezes every timer; resume restarts them where they stopped
  *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
@@ -58,6 +58,7 @@ static struct {
     uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
 } voice[NV];
 static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
+static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
 static env_t env[NV];                          /* colour voices 1..3: each note attacks, holds, releases (envelope.h) */
 static uint32_t note_off_ms[NV];               /* when each colour note's gate closes */
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
@@ -105,7 +106,9 @@ static void app_audio(int32_t *out, uint32_t n)
         ph_d = voice[v].ph_detune;
         step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
         int32_t amp = voice[v].amp, g = voice[v].gate;
-        if (v == 0) {                           /* the drone: a slow gate glide, once per block not per sample */
+        if (paused) {                           /* BTN_PLAY: halve every block, ~45 ms to silence, not a click */
+            amp >>= 1;
+        } else if (v == 0) {                    /* the drone: a slow gate glide, once per block not per sample */
             if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }
             else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
         } else {
@@ -168,7 +171,6 @@ static int32_t home_degree, plane_degree;        /* the drone's root, and the ch
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
 static uint32_t next_note_ms[NV];                /* per-voice note-trigger timer: 0=drone, 1-3=colours */
-static volatile uint32_t paused = 0u;           /* pause/resume toggle (BTN_PLAY): 1 = paused, 0 = generating */
 static int32_t left_plane = 0, left_root = 0;   /* timer state when paused, for clean resume */
 static int32_t left_note_ms[NV];                 /* per-voice timer state when paused */
 
@@ -421,7 +423,6 @@ static void app_main(void)
         /* mute during pause: instant silence over ~30ms */
         if (paused) {
             uint32_t v;
-            for (v = 0; v < NV; v++) voice[v].amp = 0;
             for (v = 1; v < NV; v++) env_init(&env[v]);
         }
 
