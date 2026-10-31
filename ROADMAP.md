@@ -10,7 +10,7 @@ rather than an explicit answer, and is flagged as such.
 
 **Status**: the audio engine below (drone + 3 chord voices, both timers, panel mapping, persistence) is
 implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via CI-built `.fwsc` packages, and
-**confirmed working by ear on the real hardware**. The reactive pixel-art screen is built (Monet palette, see below);
+**confirmed working by ear on the real hardware**. The pond screen is built (Monet palette and direction, see below);
 its slow ripple and lily-pad drift are decoupled from the panel, and their feel on the FM-1 display is still being tuned by eye. The
 Pages emulator is live and working. The worst audio ISR block is **1.3 ms of the 2.9 ms budget** (measured on the FM-1,
 2026-10-31, with 7 harmonics per voice and stereo). The generative RNG is seeded from boot time, so every power-on
@@ -54,9 +54,21 @@ already provided by `platform.c`) and restored on boot — the instrument comes 
 | `BTN_PLAY`      | pause/resume (freeze timers, fade out) |
 | `MASTER`        | volume (unchanged from the stock demo) |
 
-### Screen: reactive impressionist pixel art
+### Screen: a living Monet pond
 
-An impressionist pixel-art lily-pond scene (Monet-ish), not a static image — plus a small status-text overlay
+**Direction (user, 2026-10-31).** The screen is a visualization that matches the mood of the music, and it should
+read as Monet's _Water Lilies_: an impressionist painting, not a dashboard. It is not a control readout, so the
+motion never follows the panel (the knobs are being remapped, and the pond must not move when they do).
+
+- **The lilies are the greens.** They are relatively stationary: each pad stays in its place and makes only a
+  small random wander (up to 2 px, to a new spot every few seconds).
+- **The water is everything else, in the rest of the palette.** It is a nearly continuous field, with neighbouring
+  cells blending smoothly, and it moves slowly like water on a pond (two slow crossing waves, not per-cell noise).
+- **Mellow pace.** Slow, constant motion, always. Nothing flickers, jumps or speeds up.
+- **Music shows up as colour and presence, not speed:** water brightness (`ENC_KNOB2`), how many pads bloom
+  (density), and the bloom shade (chord template). `BTN_ARP` toggles the drone only and leaves the screen alone.
+
+An impressionist pixel-art lily-pond scene, not a static image, plus a small status-text overlay
 (current scale name) for legibility while testing. Built from the platform's existing `cv_pset`/`cv_rect`/`cv_line`/
 `cv_text` primitives; deliberately blocky/low-fidelity ("pixel art"), not an attempt at smooth photographic
 gradients.
@@ -68,14 +80,15 @@ second chord template is the same purple dimmed, not a different hue — there's
 reference). The color knob brightens/darkens the water within this range; it doesn't shift hue (the reference
 palette has no separate warm tone to shift toward).
 
-Reactive mapping (v1):
+What the music drives (v1), and what it deliberately does not:
 
-| Drives                                | Affects                                                                                       |
-| ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)                        |
-| a chord-change event                  | lily-pad bloom color shift, at that instant                                                   |
-| Constant (independent of controls)    | slow meditative water-ripple (constant 1 step/frame) + lily pad Brownian motion (±2 px drift) |
-| `ENC_ALGORITHM` (density), continuous | how many lily pads look "active" at once                                                      |
+| Drives                                | Affects                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)   |
+| a chord-change event                  | lily-pad bloom colour shift, at that instant                             |
+| `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple at once                                  |
+| nothing (always on)                   | the water's flow, the pads' tiny wander                                  |
+| nothing (by design)                   | `BTN_ARP`, `ENC_KNOB1` (drift) and every other control never move the pond |
 
 ## Deferred to later versions
 

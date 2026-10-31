@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The reactive pixel-art lily-pond screen (ROADMAP.md): pure data and pure functions only, no platform
+/* The lily-pond screen (ROADMAP.md "Screen": Monet's Water Lilies; stationary lilies, continuous flowing water,
+ * motion never tied to the panel): pure data and pure functions only, no platform
  * dependency (no fm1_*, no screen calls, no floats) -- so tests/scene_test.c exercises this directly with the
  * system compiler, and impressionism.c includes it for the real build (which turns these into RGB565 via its
  * own RGB() macro and the actual lcd_fill/cv_* calls -- that part isn't unit-tested, see docs/RULES.md; it's

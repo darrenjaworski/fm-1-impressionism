@@ -24,7 +24,7 @@ This is a **generative ambient** instrument, not a played-note synth: the goal i
 - No hard clock-quantized sequencer. Each voice free-runs on its own slow, semi-random timer (random-walk or weighted-probability note/chord picker, loosely-periodic or Poisson-ish gating) so the texture breathes instead of looping on a grid — this is what makes it ambient/rubato rather than a groovebox.
 - Synthesis is plain C in the 44.1kHz/256-frame audio ISR, no DSP coprocessor (see Firmware architecture below) — build voices as phase-accumulator sine/additive stacks, not anything needing heavy division or steep filtering, and budget voice count against the flash/RAM limits already noted.
 - Timbre should read "soft focus": slow attack/release envelopes, detuned unison stacking, slow LFO drift on filter cutoff/amplitude. Avoid percussive transients or anything metronomic in the sound itself.
-- Panel/screen: keys and encoders are macro controls over the generative system (scale/mode, density, drift rate, drone on/off, filter "color") rather than a note-by-note keyboard; the screen favors slow pastel color washes over hard meters/numbers.
+- Panel/screen: keys and encoders are macro controls over the generative system (scale/mode, density, drift rate, drone on/off, filter "color") rather than a note-by-note keyboard; the screen is a Monet _Water Lilies_ pond that matches the mood: stationary green lilies with a tiny random wander over a continuous, slowly flowing water field, with constant slow motion that no control speeds up or slows down (see ROADMAP.md's "Screen"), never hard meters/numbers.
 - This direction also governs `fmhub.json`'s `what` description and `kinds`, and the eventual FM-1 identity/branding.
 
 ## Conventions
