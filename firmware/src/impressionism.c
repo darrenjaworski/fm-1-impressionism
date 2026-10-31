@@ -261,13 +261,13 @@ static void init_pond(void)
 
 static int32_t pad_jitter_x(uint32_t x, uint32_t y)  /* brownian movement for lily pads: small, mellow drift */
 {
-    uint32_t h = cell_hash(x * 2u + y * 3u + ripple_phase / 32u);
+    uint32_t h = cell_hash(x + ripple_phase / 32u, y);
     return (int32_t)((h % 5u) - 2);  /* -2..+2 pixel drift per pad */
 }
 
 static int32_t pad_jitter_y(uint32_t x, uint32_t y)
 {
-    uint32_t h = cell_hash(x * 3u + y * 5u + ripple_phase / 32u + 1u);
+    uint32_t h = cell_hash(x, y + ripple_phase / 32u + 1000u);
     return (int32_t)((h % 5u) - 2);
 }
 
