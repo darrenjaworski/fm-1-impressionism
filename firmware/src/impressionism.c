@@ -47,7 +47,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
 #endif
 #ifndef SEED_SHOW
-#define SEED_SHOW 0                             /* 1: show the boot seed in hex on screen, to check it differs across power-ons.
+#define SEED_SHOW 1                             /* 1: show the boot seed in hex on screen, to check it differs across power-ons.
                                                    Same line as ISR_TIMING, so not both at once */
 #endif
 
