@@ -47,7 +47,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
 #endif
 #ifndef SEED_SHOW
-#define SEED_SHOW 1                             /* 1: show the boot seed in hex on screen, to check it differs across power-ons.
+#define SEED_SHOW 0                             /* 1: show the boot seed in hex on screen, to check it differs across power-ons.
                                                    Same line as ISR_TIMING, so not both at once */
 #endif
 
@@ -380,7 +380,7 @@ static void app_main(void)
 #ifndef DINGHY_HOST
     {   /* boot seed: the ms counter, the CPU tick count and two ADC reads (battery, master pot) are mixed together,
            so the start depends on all of them. A timed-out read (-1) is skipped. cell_hash spreads the bits; 0 is
-           never a seed. Whether it differs between power-ons is checked on hardware with SEED_SHOW (ROADMAP.md). */
+           never a seed. Checked on the FM-1 with SEED_SHOW: it differs across power-ons. */
         uint32_t seed = cell_hash(fm1_ms, fm1_ticks());
         int32_t a;
         if ((a = fm1_adc_read(FM1_ADC_BATT)) >= 0) seed = cell_hash(seed, (uint32_t)a);

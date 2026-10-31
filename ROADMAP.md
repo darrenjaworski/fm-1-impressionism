@@ -14,8 +14,7 @@ implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 vi
 its slow ripple and lily-pad drift are decoupled from the panel, and their feel on the FM-1 display is still being tuned by eye. The
 Pages emulator is live and working. The worst audio ISR block is **1.3 ms of the 2.9 ms budget** (measured on the FM-1,
 2026-10-31, with 7 harmonics per voice and stereo). The generative RNG is seeded from boot time and two ADC reads, so every
-power-on should play a different sequence. That is not yet checked on hardware: `SEED_SHOW=1` shows the seed in hex
-on screen, for the 3+ power-on check. Remaining before public Hub submission: verify identity `FM-1_95N` against the Hub
+power-on plays a different sequence (seed confirmed changing across power cycles on the FM-1, 2026-10-31, with `SEED_SHOW=1`). Remaining before public Hub submission: verify identity `FM-1_95N` against the Hub
 catalogue, finish the control remap and feature set per v2 below.
 
 ## Initial scope (v0.0.1)
