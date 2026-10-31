@@ -21,11 +21,11 @@
  *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
  * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
- * re-randomizes fresh each boot -- only the knob settings are meant to survive, ROADMAP.md).
+ * re-randomizes fresh each boot (engine_rng is seeded from fm1_ms) -- only the knob settings are meant to survive, ROADMAP.md).
  *
  * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
- * lily blooms coloured by the current chord template (and rippling with the water), water shimmer speed from
- * drift rate, how many pads look "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
+ * lily blooms coloured by the current chord template (and rippling with the water), a slow constant shimmer and a
+ * small brownian drift of the pads that ignore the panel, how many pads look "active" from density, and overall brightness from drone on/off -- plus a small status-text overlay below it
  * (the scale name, drone state, D/R).
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
@@ -40,7 +40,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
-#include "reverb.h"                             /* Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s */
+#include "reverb.h"                             /* Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, ~4.5 s tail */
 #include "envelope.h"                           /* per-note attack and release for the colour voices */
 
 #ifndef ISR_TIMING
@@ -140,7 +140,7 @@ static void app_audio(int32_t *out, uint32_t n)
         voice[v].ph = ph;
         voice[v].ph_detune = ph_d;
     }
-    /* the space: Schroeder reverb on the mono sum (4 combs + 2 allpasses, T60 ~7s) */
+    /* the space: Schroeder reverb on the mono sum (4 damped combs + 2 feedback combs, ~4.5 s tail) */
     for (i = 0; i < n; i++) {
         int16_t wl, wr;
         int32_t mono = (out[2u * i] + out[2u * i + 1u]) >> 1;

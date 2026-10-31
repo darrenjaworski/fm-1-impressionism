@@ -10,10 +10,12 @@ rather than an explicit answer, and is flagged as such.
 
 **Status**: the audio engine below (drone + 3 chord voices, both timers, panel mapping, persistence) is
 implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via CI-built `.fwsc` packages, and
-**confirmed working by ear on the real hardware**. The reactive pixel-art screen is built (Monet palette, Monet
-palette, see below), **confirmed working on the FM-1 display**. The Pages emulator is live and working. Remaining
-before public Hub submission: measure ISR time post-harmonics, verify identity `FM-1_95N` against Hub catalogue,
-complete the feature set per v2 below.
+**confirmed working by ear on the real hardware**. The reactive pixel-art screen is built (Monet palette, see below);
+its slow ripple and lily-pad drift are decoupled from the panel, and their feel on the FM-1 display is still being tuned by eye. The
+Pages emulator is live and working. The worst audio ISR block is **1.3 ms of the 2.9 ms budget** (measured on the FM-1,
+2026-10-31, with 7 harmonics per voice and stereo). The generative RNG is seeded from boot time, so every power-on
+plays a different sequence. Remaining before public Hub submission: verify identity `FM-1_95N` against the Hub
+catalogue, finish the control remap and feature set per v2 below.
 
 ## Initial scope (v0.0.1)
 
@@ -40,7 +42,7 @@ complete the feature set per v2 below.
 Current scale/mode, density, drift rate, and drone on/off are saved to flash (`settings_save`/`settings_load`,
 already provided by `platform.c`) and restored on boot — the instrument comes back the way it was left.
 
-### Panel mapping
+### Panel mapping (v1)
 
 | Control         | Does                                   |
 | --------------- | -------------------------------------- |
@@ -49,6 +51,7 @@ already provided by `platform.c`) and restored on boot — the instrument comes 
 | `ENC_KNOB1`     | drift rate                             |
 | `ENC_KNOB2`     | filter "color" (cutoff)                |
 | `BTN_ARP`       | drone on/off                           |
+| `BTN_PLAY`      | pause/resume (freeze timers, fade out) |
 | `MASTER`        | volume (unchanged from the stock demo) |
 
 ### Screen: reactive impressionist pixel art
@@ -65,15 +68,15 @@ second chord template is the same purple dimmed, not a different hue — there's
 reference). The color knob brightens/darkens the water within this range; it doesn't shift hue (the reference
 palette has no separate warm tone to shift toward).
 
-Reactive mapping:
+Reactive mapping (v1):
 
-| Drives                                | Affects                                                                 |
-| ------------------------------------- | ----------------------------------------------------------------------- |
-| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)  |
-| a chord-change event                  | lily-pad bloom color shift, at that instant                             |
-| `ENC_KNOB1` (drift rate), continuous  | speed of the water-ripple/reflection animation                          |
-| `ENC_ALGORITHM` (density), continuous | how many lily pads/ripples look "active" at once                        |
-| `BTN_ARP` (drone on/off)              | presence of a warm sun-glow/reflection halo (off = cooler, dimmer pond) |
+| Drives                                | Affects                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)                        |
+| a chord-change event                  | lily-pad bloom color shift, at that instant                                                   |
+| Constant (independent of controls)    | slow meditative water-ripple (constant 1 step/frame) + lily pad Brownian motion (±2 px drift) |
+| `ENC_ALGORITHM` (density), continuous | how many lily pads look "active" at once                                                      |
+| `BTN_ARP` (drone on/off)              | overall brightness shift (off = cooler, dimmer pond)                                          |
 
 ## Deferred to later versions
 
@@ -91,7 +94,7 @@ Everything in the mission not covered above, to add incrementally:
 
 ## Out of scope / not yet decided for any version
 
-- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 parallel damped combs → 2 series feedback combs, ~4.5 s tail below 1 kHz) is stable. Measured worst audio ISR block on the FM-1 before harmonics: 0.6 ms (budget 2.9 ms, `ISR_TIMING=1` shows it on screen). **Needs re-measurement post-harmonics** (each voice now does 7 sine calls per sample).
+- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 parallel damped combs → 2 series feedback combs, ~4.5 s tail below 1 kHz) is stable. Measured worst audio ISR block on the FM-1: **1.3 ms** (budget 2.9 ms, 2026-10-31, with harmonics and stereo; it was 0.6 ms before those; build with `ISR_TIMING=1` to show it on screen). Re-measure after any per-sample change.
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
 ## Deferred items — done (2026-10-30 session 2)
@@ -117,14 +120,14 @@ timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused.
 Host renders, 3 minutes at default settings, first 15 s skipped. Targets are from the reference recording (a Debussy
 "Reverie" on a modular synth). The ear is the final judge; these numbers guide the work.
 
-| Metric | Before | Now | Target |
-| --- | --- | --- | --- |
-| Envelope range p95-p10 (1 s RMS) | 2.9 dB | 7.7 dB | 15+ dB |
-| Spectral centroid | 143 Hz | 236 Hz | 350-500 Hz |
-| 20-100 Hz band | -5 dB | -8 dB | -15 to -25 dB |
-| 1.6-3.2 kHz band | -73 dB | -38 dB | -25 to -35 dB |
-| L/R correlation | 0.58 | 0.51 | 0.3-0.5 |
-| Clipped samples | 802 | 0 | 0 |
+| Metric                           | Before | Now    | Target        |
+| -------------------------------- | ------ | ------ | ------------- |
+| Envelope range p95-p10 (1 s RMS) | 2.9 dB | 7.7 dB | 15+ dB        |
+| Spectral centroid                | 143 Hz | 236 Hz | 350-500 Hz    |
+| 20-100 Hz band                   | -5 dB  | -8 dB  | -15 to -25 dB |
+| 1.6-3.2 kHz band                 | -73 dB | -38 dB | -25 to -35 dB |
+| L/R correlation                  | 0.58   | 0.51   | 0.3-0.5       |
+| Clipped samples                  | 802    | 0      | 0             |
 
 What changed to get here: colour notes attack, hold and release (`envelope.h`); the drone an octave lower and
 about 6 dB under the colour voices; a slow ~11-cent pitch drift per voice; a 2nd to 6th harmonic on each voice,
@@ -164,10 +167,9 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
   minutes (a continuous turn with no press changes nothing — this is a press-to-cycle control, not a
   continuous one, unlike the other knobs). On expiry, fade `filter_k` and all voice gates to 0 over the same
   ~45 ms curve `BTN_PLAY`'s pause already uses, then freeze timers the same way pause does. Main-loop only
-  (a counter compared against `fm1_ms`) — zero ISR risk, ships without waiting on the ISR re-measurement
-  above. Fits "sits on a shelf and drifts" literally; doubles as a night-lamp-style auto-off.
+  (a counter compared against `fm1_ms`) — zero ISR risk. Fits "sits on a shelf and drifts" literally; doubles as a night-lamp-style auto-off.
   Reverb size/damping (the other half of the original fork) is deferred, not dropped — see "Out of scope /
-  not yet decided" below; it still needs the ISR re-measurement first and can take a different control later
+  not yet decided" below; it needs ISR headroom (1.3 of 2.9 ms used) and can take a different control later
   (e.g. `ENC_PRESETS`'s own long-press) without conflicting with this.
 - **`ENC_PRESETS` — step through 4 saved "moods"**: turning it increments/decrements a `preset_index` (0–3)
   and immediately loads that slot's `{scale, density, drift, color, drone_on}` into `set` (today's single-slot
@@ -194,7 +196,7 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
 ### Sound and measurement
 
 - **Automatic soft-focus LFO** (deferred in v1): slow modulation (0.1–0.5 Hz) on filter cutoff and amplitude, independent per voice, adds the mission's "slow LFO drift" as an automatic layer.
-- **Spectral balancing**: re-measure ISR on hardware post-harmonics, then adjust harmonic levels or envelope shape to hit the ROADMAP targets (envelope range 15+ dB, centroid 350–500 Hz). Current: 7.7 dB and 236 Hz respectively.
+- **Spectral balancing**: adjust harmonic levels or envelope shape to hit the ROADMAP targets (envelope range 15+ dB, centroid 350–500 Hz). Current: 7.7 dB and 236 Hz respectively.
 - **Reverb size/damping control** (if ISR measurement permits): a knob scaling the feedback/damping coefficient in `comb_step()` (`firmware/src/reverb.h`) rather than a true resize (fixed-length delay buffers can't resize at runtime). No control assigned yet — `ENC_KNOB4` went to the sleep timer instead (Control and interface, above); candidates are `ENC_PRESETS`'s long-press or a future encoder if the panel gains one.
 
 ### Ecosystem
@@ -219,4 +221,3 @@ both be far larger undertakings than this needed to be). `fm1-emu` sidesteps tha
 `shcherbakov7/m-wave-fm1-browser-emulator`, was smaller/less documented at research time — not used.)
 
 **Workflow status**: the workflow is complete and working. On every push to `site/**` and every published release, `.github/workflows/pages.yml` builds `fm1-emu` at the pinned commit (`FM1_EMU_REF`), copies this repo's latest `.fwsc`, overwrites the emulator's `firmwares.json` with this project's catalog, and publishes to GitHub Pages. `FM1_EMU_REF` is updated manually, not automatically — fine for now.
-
