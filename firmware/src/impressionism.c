@@ -43,7 +43,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "diffuse.h"                            /* the cheap multi-tap diffuser (dreamier space) */
 
 #ifndef ISR_TIMING
-#define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
+#define ISR_TIMING 1                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
 #endif
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
