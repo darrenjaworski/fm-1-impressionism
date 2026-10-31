@@ -151,9 +151,10 @@ static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshi
 static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
 static uint32_t chord_templ;
 static uint32_t next_plane_ms, next_root_ms;
-static uint32_t next_note_ms[3];                 /* per-colour-voice note-retrigger timers (voices 1-3) */
+static uint32_t next_note_ms[NV];                /* per-voice note-trigger timer: 0=drone, 1-3=colours */
 static volatile uint32_t paused = 0u;           /* pause/resume toggle (BTN_PLAY): 1 = paused, 0 = generating */
 static int32_t left_plane = 0, left_root = 0;   /* timer state when paused, for clean resume */
+static int32_t left_note_ms[NV];                 /* per-voice timer state when paused */
 
 static void retune_voices(uint32_t scale)
 {
@@ -185,6 +186,14 @@ static void reroot(uint32_t scale, uint32_t drift)
     plane_degree = 0;
     retune_voices(scale);
     next_root_ms = fm1_ms + 60000u + rng_next(&engine_rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
+}
+
+/* voice 1-3: trigger a new note (attack). Only call when voice is quiet to avoid clicks */
+static void trigger_note(uint32_t v, uint32_t scale, uint32_t density)
+{
+    if (v == 0 || v >= NV) return;                /* only for colour voices */
+    voice[v].gate = GATE_FULL;                    /* start the note attack */
+    next_note_ms[v] = fm1_ms + next_trigger_ticks(density, &engine_rng);  /* schedule next note */
 }
 
 /* ---- settings (what survives a power-off, ROADMAP.md) */
@@ -289,7 +298,7 @@ static void draw_isr_time(void) {}
 static void app_main(void)
 {
     uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
-    int32_t e, left_plane = 0, left_root = 0;
+    int32_t e;
 
     if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
         set.color > 31u || set.drone_on > 1u)
@@ -298,6 +307,12 @@ static void app_main(void)
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
     replane(set.scale, set.density, set.drift);
+    {   /* initialize per-voice note timers: drone re-roots slowly, colour voices trigger freely */
+        uint32_t v;
+        next_note_ms[0] = fm1_ms + 60000u;  /* drone re-roots after 60+ seconds, like reroot */
+        for (v = 1; v < NV; v++)
+            next_note_ms[v] = fm1_ms + next_trigger_ticks(set.density, &engine_rng);
+    }
     draw_chrome();
     draw_pond();
     draw_status();
@@ -336,33 +351,52 @@ static void app_main(void)
         b = fm1_input_edges(&rel);
         if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
         fm1_led_key(BTN_ARP, set.drone_on);
-        if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation, the current chord sustains */
+        if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation, current notes sustain */
             paused ^= 1u;
-            if (paused) {                            /* remember how long each timer had left, so resuming doesn't */
-                left_plane = (int32_t)(next_plane_ms - fm1_ms);   /* fire both overdue timers at once */
+            if (paused) {                            /* remember timer state for clean resume */
+                left_plane = (int32_t)(next_plane_ms - fm1_ms);
                 left_root = (int32_t)(next_root_ms - fm1_ms);
+                uint32_t v;
+                for (v = 0; v < NV; v++)
+                    left_note_ms[v] = (int32_t)(next_note_ms[v] - fm1_ms);
             } else {
                 next_plane_ms = fm1_ms + (uint32_t)(left_plane > 0 ? left_plane : 0);
                 next_root_ms = fm1_ms + (uint32_t)(left_root > 0 ? left_root : 0);
+                uint32_t v;
+                for (v = 0; v < NV; v++)
+                    next_note_ms[v] = fm1_ms + (uint32_t)(left_note_ms[v] > 0 ? left_note_ms[v] : 0);
             }
         }
-        fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, the dim glow while paused */
+        fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, off while paused */
 
-        if (scale_drawn != set.scale) {          /* the scale changed: re-root and re-plane right away, since a
-                                                     degree means a different interval in a different scale */
+        if (scale_drawn != set.scale) {          /* the scale changed: reset timers and re-root/plane right away */
             home_degree = 0; plane_degree = 0;
+            uint32_t v;
+            for (v = 0; v < NV; v++) next_note_ms[v] = fm1_ms;  /* trigger all voices right away */
             reroot(set.scale, set.drift);
             replane(set.scale, set.density, set.drift);
             scale_drawn = set.scale;
         }
+
+        /* generation timers (only when not paused) */
         if (!paused && (int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
         if (!paused && (int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
-        voice[0].gate = (set.drone_on && !paused) ? GATE_FULL : 0;
-        {
+
+        /* per-voice note triggering: each colour voice triggers independently when quiet */
+        if (!paused) {
             uint32_t v;
-            for (v = 1; v < NV; v++) voice[v].gate = paused ? 0 : GATE_FULL;
+            for (v = 1; v < NV; v++) {
+                if ((int32_t)(fm1_ms - next_note_ms[v]) >= 0 && voice[v].amp < GATE_FULL / 2) {
+                    trigger_note(v, set.scale, set.density);
+                }
+            }
         }
-        if (paused) {                               /* pause: instant silence (zero amp), not a 9s fade */
+
+        /* voice gates: drone controlled by setting, colour voices managed by triggers */
+        voice[0].gate = (set.drone_on && !paused) ? GATE_FULL : 0;
+
+        /* mute during pause: instant silence over ~30ms */
+        if (paused) {
             uint32_t v;
             for (v = 0; v < NV; v++) voice[v].amp = 0;
         }
