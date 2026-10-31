@@ -41,6 +41,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
 #include "reverb.h"                             /* Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s */
+#include "envelope.h"                           /* per-note attack and release for the colour voices */
 
 #ifndef ISR_TIMING
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
@@ -57,6 +58,8 @@ static struct {
     uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
 } voice[NV];
 static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
+static env_t env[NV];                          /* colour voices 1..3: each note attacks, holds, releases (envelope.h) */
+static uint32_t note_off_ms[NV];               /* when each colour note's gate closes */
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 
 /* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
@@ -102,8 +105,13 @@ static void app_audio(int32_t *out, uint32_t n)
         ph_d = voice[v].ph_detune;
         step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
         int32_t amp = voice[v].amp, g = voice[v].gate;
-        if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }        /* once per block, not per sample */
-        else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
+        if (v == 0) {                           /* the drone: a slow gate glide, once per block not per sample */
+            if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }
+            else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
+        } else {
+            env_tick(&env[v], ENV_ATTACK_STEP);
+            amp = env_to_amp(&env[v]);
+        }
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
         for (i = 0; i < n; i++) {
@@ -167,11 +175,7 @@ static int32_t left_note_ms[NV];                 /* per-voice timer state when p
 static void retune_voices(uint32_t scale)
 {
     int32_t root_note = (int32_t)ROOT_BASE_NOTE - 12 + scale_degree_to_semitone(scale, home_degree);  /* drone: an octave below the chord */
-    int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
-    uint32_t v;
     voice[0].inc = note_to_inc(root_note);
-    for (v = 1; v < NV; v++)
-        voice[v].inc = note_to_inc(chord_note + chord_voice_semitone(chord_templ, v - 1u));
 }
 
 /* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
@@ -197,11 +201,16 @@ static void reroot(uint32_t scale, uint32_t drift)
 }
 
 /* voice 1-3: trigger a new note (attack). Only call when voice is quiet to avoid clicks */
-static void trigger_note(uint32_t v, uint32_t scale, uint32_t density)
+#define NOTE_MIN_MS 2500u                       /* how long a colour note is held before it releases: 2.5..7 s */
+#define NOTE_RANGE_MS 4500u
+
+/* a colour voice takes the chord as it is now, only when it is quiet, so no sounding note jumps pitch */
+static void trigger_note(uint32_t v, uint32_t scale)
 {
-    if (v == 0 || v >= NV) return;                /* only for colour voices */
-    voice[v].gate = GATE_FULL;                    /* start the note attack */
-    next_note_ms[v] = fm1_ms + next_trigger_ticks(density, &engine_rng);  /* schedule next note */
+    int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
+    voice[v].inc = note_to_inc(chord_note + chord_voice_semitone(chord_templ, v - 1u));
+    env_gate_on(&env[v]);
+    note_off_ms[v] = fm1_ms + NOTE_MIN_MS + rng_next(&engine_rng) % NOTE_RANGE_MS;
 }
 
 /* ---- settings (what survives a power-off, ROADMAP.md) */
@@ -395,8 +404,13 @@ static void app_main(void)
         if (!paused) {
             uint32_t v;
             for (v = 1; v < NV; v++) {
-                if ((int32_t)(fm1_ms - next_note_ms[v]) >= 0 && voice[v].amp < GATE_FULL / 2) {
-                    trigger_note(v, set.scale, set.density);
+                if (env[v].gate) {
+                    if ((int32_t)(fm1_ms - note_off_ms[v]) >= 0) {
+                        env_gate_off(&env[v]);
+                        next_note_ms[v] = fm1_ms + next_trigger_ticks(set.density, &engine_rng);
+                    }
+                } else if (env_is_quiet(&env[v]) && (int32_t)(fm1_ms - next_note_ms[v]) >= 0) {
+                    trigger_note(v, set.scale);
                 }
             }
         }
@@ -408,6 +422,7 @@ static void app_main(void)
         if (paused) {
             uint32_t v;
             for (v = 0; v < NV; v++) voice[v].amp = 0;
+            for (v = 1; v < NV; v++) env_init(&env[v]);
         }
 
         st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |

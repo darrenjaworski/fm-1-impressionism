@@ -1,34 +1,41 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Envelope: per-block attack → exponential decay. Level in Q8 (0..32640 = 0..127.5) */
+/* Per-voice note envelope: a linear attack while the gate is on, then an exponential release once it is off.
+   Level in Q8 (0..ENV_FULL = 0..127.5). Advanced once per audio block (172 blocks/s at 44.1 kHz, 256 frames). */
 
 #ifndef ENVELOPE_H
 #define ENVELOPE_H
 
 #include <stdint.h>
 
-#define ENV_ATTACK_MS 150                       /* attack time: 150 ms */
-#define ENV_ATTACK_STEP ((ENV_ATTACK_MS * 44100u / 1000u + 127u) / 256u)  /* per 256-frame block */
-#define ENV_DECAY_SHIFT 7                       /* decay: level -= level >> 7 each block. T60 ~6s */
-#define ENV_QUIET_THRESHOLD 32                  /* below this (Q8), the voice is "quiet" for retriggering */
+#define ENV_FULL 32640u                         /* Q8 full level = GATE_FULL * 4 */
+#define ENV_ATTACK_STEP 64u                     /* Q8 per block: ~3 s to full */
+#define ENV_DECAY_SHIFT 7                       /* release: level -= level >> 7 per block, ~5 s to 60 dB down */
+#define ENV_QUIET_THRESHOLD 32u                 /* below this (Q8) the voice counts as quiet and may retrigger */
 
 typedef struct {
-    uint32_t level;                             /* Q8: 0 = silent, 32640 = full (GATE_FULL * 4) */
+    uint32_t level;                             /* Q8: 0 = silent, ENV_FULL = full */
+    uint32_t gate;                              /* 1: note held (attack/sustain), 0: released (decay) */
 } env_t;
 
-static inline void env_init(env_t *e) { e->level = 0; }
+static inline void env_init(env_t *e) { e->level = 0; e->gate = 0; }
 
-static inline void env_attack(env_t *e) { e->level = 32640u; }  /* instant to gate, then release */
+static inline void env_gate_on(env_t *e) { e->gate = 1; }
 
-static inline void env_release(env_t *e)
+static inline void env_gate_off(env_t *e) { e->gate = 0; }
+
+static inline void env_tick(env_t *e, uint32_t attack_step)
 {
-    if (e->level > 0) {
-        uint32_t decay = (e->level >> ENV_DECAY_SHIFT);
-        if (decay == 0) decay = 1;  /* always decay at least 1 unit per block */
+    if (e->gate) {
+        e->level += attack_step;
+        if (e->level > ENV_FULL) e->level = ENV_FULL;
+    } else if (e->level > 0) {
+        uint32_t decay = e->level >> ENV_DECAY_SHIFT;
+        if (decay == 0) decay = 1;              /* always decay at least 1 unit per block */
         e->level = e->level > decay ? e->level - decay : 0;
     }
 }
 
-static inline int32_t env_to_amp(env_t *e) { return (int32_t)(e->level >> 2u); }  /* Q8 -> Q6 for voice amp */
+static inline int32_t env_to_amp(const env_t *e) { return (int32_t)(e->level >> 2u); }  /* Q8 -> the voice amp scale */
 
 static inline int env_is_quiet(const env_t *e) { return e->level < ENV_QUIET_THRESHOLD; }
 
