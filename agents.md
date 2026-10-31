@@ -54,7 +54,7 @@ Net effect: every push to `main` that passes `test.yml` gets a tagged release wi
 **Portability**
 
 - Firmware headers include only `<stdint.h>`. The JieLi toolchain has no libc headers, and the host build won't catch this: `<string.h>` compiled locally and failed in CI.
-- Avoid struct assignment and large initializers in firmware code: they can emit `memcpy` calls. Write fields one by one (see `set_defaults()`).
+- Avoid struct assignment and large initializers in firmware code: they can emit `memcpy` calls. Write fields one by one (see `settings_set_defaults()`).
 - File-scope names must not collide with `firmware/src/libc.c` or `platform.c`, which the host build doesn't always compile the same way. A collision on `rng_state` only showed up on the device build.
 - Big buffers go in `.pool`, using the host/device `#ifdef` already in `impressionism.c`. It's zeroed at boot, so don't clear it by hand.
 
@@ -68,23 +68,39 @@ Net effect: every push to `main` that passes `test.yml` gets a tagged release wi
 **Fixed point**
 
 - State the format of a value where it's declared (Q15, Q8, 32-bit phase).
-- Check that an `int32_t` product can't overflow, using worst-case inputs.
+- Check that an `int32_t` product can't overflow, using worst-case inputs. Worst case means the largest value the engine can reach, not what the default render plays: the pitch drift overflowed above 689 Hz while the default render stayed under 392 Hz.
 - `>>` on a negative value rounds toward minus infinity. In a feedback loop that leaves a permanent offset, so account for it.
 
 **Structure and style**
 
-- Pure logic goes in a header with no platform dependency (`planing.h`, `envelope.h`, `reverb.h`), so it can be tested on the host. Raw registers stay in `firmware/hal/`.
+- Pure logic goes in a header with no platform dependency, so it can be tested on the host. Raw registers stay in `firmware/hal/`.
+- Keep the layers. `impressionism.c` is only input, the audio ISR, drawing and applying events. Decisions about what plays and when go in `engine.h`, saved settings and knob limits in `settings.h`, on-screen text in `status.h`, pond logic in `scene.h`, synthesis helpers in `synth.h`. New features extend those, and don't add logic to the main loop.
 - `static` for everything at file scope; `<stdint.h>` types; `u` suffix on unsigned constants; `/* */` comments; 4-space indent; `snake_case` functions, `UPPER_CASE` macros.
 - Declare constants that shape the sound by name, with their unit and resulting time or level.
 - Repeated blocks become a small `static inline` helper. Delete code and macros when they stop being used.
-- Comments explain why, and must be true. A number in a comment (a time, a size, a decay) is measured or calculated, and changes when the code does.
+- Comments explain why, and must be true. A number in a comment (a time, a size, a decay) is measured or calculated, and changes when the code does. Don't name bugs or tasks in comments.
+- When a table or range grows, check everything sized for the old one: bit fields in `settings_state_word`, `!= 0` checks on ids, tests that list the old values, and screen text width. Going from 2 to 8 chords would have collided the chord and scale bits.
+
+**Music logic**
+
+- Limit pitch in semitones, not scale degrees. A degree is a different size in each scale, so a degree limit let the drone fall to 12 Hz in one scale and not another.
+- Whether a chord fits depends on the scale and the degree. Check fit with `chord_fits`, not per-scale lists.
+- A control must make an audible difference at every step. Measure the step-to-step effect, because other limits can cancel it: the release time made density D2 and D3 almost the same.
+
+**Screen**
+
+- The screen follows the direction in ROADMAP.md's "Screen" section.
+- Motion comes from `fm1_ms`, never from a redraw count or a setting. Anything that changes per redraw runs faster when a knob forces extra redraws.
+- All status text goes through `status.h`, with a test that the longest combination of every value fits the 240 px row. Check that combination, not the default.
+- Choosing cells in raster order fills the pond from the top. Pick by a fixed hash so they spread.
 
 ### Testing guidelines
 
 **What to test where**
 
 - Pure logic: test first in `tests/*_test.c`, and add it to `tests/run_tests.sh`.
-- Note scheduling and ISR integration: host renders with a script in `tests/scripts/`.
+- Note scheduling, pause and timers: `tests/engine_test.c`, on a fake clock over simulated hours, across all scales, densities and drifts. Default settings hide most bugs.
+- ISR integration: host renders with a script in `tests/scripts/`. Every script runs from `tests/run_tests.sh` with `tests/wav_check.py`, or CI never sees it.
 - Anything involving the real toolchain, hardware or sound: CI, then the FM-1.
 
 **Writing tests**
@@ -99,11 +115,18 @@ Net effect: every push to `main` that passes `test.yml` gets a tagged release wi
 - If a change should alter the sound and the render is byte-identical, the render isn't testing it.
 - Refactors must render byte-identical WAVs. Compare SHA-256 before and after.
 - Sanity-check any measurement script before believing its numbers.
+- A number in the docs needs a test or measurement behind it. The reverb's "~4.5 s" stood until it was measured at about 2.7 s.
+- After changing the engine or synthesis, build the unit tests and the host app with `-fsanitize=undefined -fno-sanitize-recover=undefined` and run `tests/scripts/long.txt`.
 
 **Reporting results**
 
 - `tests/run_tests.sh` only passed if it prints `ALL TESTS PASSED`. Locally it stops at `build/impressionism.bin` without a device build, so that's a partial run: rely on CI for the rest, and don't report it as passing.
-- A passing host build says nothing about the device. Check that CI passed before flashing.
+- Judge a command by its exit status. Never filter build or test output with `grep` or `head` to decide it passed: a pipeline hid a compile error, and three pushes that never built were reported as live.
+- A passing host build says nothing about the device. Before flashing, confirm `test` succeeded for the exact pushed SHA (`gh run list --commit SHA --workflow test`), and that the release tag contains that SHA and has its assets. "Latest release" can be an older build while CI runs.
+- If the user reports something on the device, reproduce it with a host script before disagreeing. Reading the code is not evidence: "the pond ignores the knobs" was wrong, and the user was right.
+- Don't claim what wasn't tested. Say a change is untested on the device, and name the check that would confirm it.
+- A plan item is done when the diff and a check show it, not when it was listed. Check the diff against the plan before saying so.
+- Subagents don't commit, push or flash. The main session reviews the diff, reruns the checks and confirms CI. Run agents that edit the same file one at a time.
 - State how something was verified: unit test, host render, emulator, or FM-1. "Confirmed by ear" applies only to the build you actually heard it on, and only once you've said so.
 - Docs record measured values with what they were measured on. Re-measure when the code changes, and don't carry old figures into a "now" column.
 
