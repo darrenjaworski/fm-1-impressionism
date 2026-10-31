@@ -47,6 +47,66 @@ Net effect: every push to `main` that passes `test.yml` gets a tagged release wi
 
 **Historical note**: `tools/next_version.py` (and its tests) implemented an earlier SemVer bump rule that shipped bad tags twice. The pipeline no longer uses it; `release.yml` uses `tools/version_timestamp.py`.
 
+### C coding standards
+
+`docs/RULES.md` is the authority on the chip (integers only, the build checks, the audio interrupt). These are the project's additions.
+
+**Portability**
+
+- Firmware headers include only `<stdint.h>`. The JieLi toolchain has no libc headers, and the host build won't catch this: `<string.h>` compiled locally and failed in CI.
+- Avoid struct assignment and large initializers in firmware code: they can emit `memcpy` calls. Write fields one by one (see `set_defaults()`).
+- File-scope names must not collide with `firmware/src/libc.c` or `platform.c`, which the host build doesn't always compile the same way. A collision on `rng_state` only showed up on the device build.
+- Big buffers go in `.pool`, using the host/device `#ifdef` already in `impressionism.c`. It's zeroed at boot, so don't clear it by hand.
+
+**Audio ISR**
+
+- Decide per sample or per block deliberately. Anything that doesn't have to be per sample runs per block.
+- No division or `%` in a per-sample loop: wrap ring-buffer positions with a compare.
+- Every variable touched by both `app_audio()` and the main loop is `volatile`, with one writer.
+- Adding per-sample work means re-measuring with `ISR_TIMING=1` on hardware. A measurement only applies to the code it was taken on.
+
+**Fixed point**
+
+- State the format of a value where it's declared (Q15, Q8, 32-bit phase).
+- Check that an `int32_t` product can't overflow, using worst-case inputs.
+- `>>` on a negative value rounds toward minus infinity. In a feedback loop that leaves a permanent offset, so account for it.
+
+**Structure and style**
+
+- Pure logic goes in a header with no platform dependency (`planing.h`, `envelope.h`, `reverb.h`), so it can be tested on the host. Raw registers stay in `firmware/hal/`.
+- `static` for everything at file scope; `<stdint.h>` types; `u` suffix on unsigned constants; `/* */` comments; 4-space indent; `snake_case` functions, `UPPER_CASE` macros.
+- Declare constants that shape the sound by name, with their unit and resulting time or level.
+- Repeated blocks become a small `static inline` helper. Delete code and macros when they stop being used.
+- Comments explain why, and must be true. A number in a comment (a time, a size, a decay) is measured or calculated, and changes when the code does.
+
+### Testing guidelines
+
+**What to test where**
+
+- Pure logic: test first in `tests/*_test.c`, and add it to `tests/run_tests.sh`.
+- Note scheduling and ISR integration: host renders with a script in `tests/scripts/`.
+- Anything involving the real toolchain, hardware or sound: CI, then the FM-1.
+
+**Writing tests**
+
+- Expected values come from an independent source: a spec, a worked example or a measurement. An assertion that recomputes the code's own expression proves nothing.
+- A test's name must describe what it checks. If it says T60, it measures T60.
+- Don't loosen a failing test until you know why it fails. If the code is wrong, fix the code. If the expectation is wrong, say so and fix it with the reason. Never remove a check just to get a pass.
+
+**Host renders**
+
+- Render long enough to reach the behaviour under test. The default 6.5 s render plays no colour notes, so use at least 3 minutes for engine changes.
+- If a change should alter the sound and the render is byte-identical, the render isn't testing it.
+- Refactors must render byte-identical WAVs. Compare SHA-256 before and after.
+- Sanity-check any measurement script before believing its numbers.
+
+**Reporting results**
+
+- `tests/run_tests.sh` only passed if it prints `ALL TESTS PASSED`. Locally it stops at `build/impressionism.bin` without a device build, so that's a partial run: rely on CI for the rest, and don't report it as passing.
+- A passing host build says nothing about the device. Check that CI passed before flashing.
+- State how something was verified: unit test, host render, emulator, or FM-1. "Confirmed by ear" applies only to the build you actually heard it on, and only once you've said so.
+- Docs record measured values with what they were measured on. Re-measure when the code changes, and don't carry old figures into a "now" column.
+
 ## Repo layout (scaffolded from Dinghy)
 
 ```
