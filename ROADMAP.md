@@ -160,18 +160,15 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
   by the knob. Pure main-loop logic (replans fire every few seconds, not per sample) — no ISR cost, testable
   in `tests/planing_test.c` without touching audio. This is the concrete implementation of the mission's
   "common-tone voice leading", which v1 only does as an unweighted random walk.
-- **`ENC_KNOB4` — reverb size/tail, OR sleep timer. Open fork, needs a decision:**
-  - *Reverb size*: the comb/feedback delay lines (`reverb.h`) are fixed-length buffers, so true resizing
-    isn't possible at runtime — the practical version is a feedback/damping knob instead, scaling the
-    `960/1024` feedback coefficient in `comb_step()` between roughly 700/1024 (short, tight) and 1000/1024
-    (long, washy). Real per-sample ISR change (near-free multiply-add, but still changes the measured
-    worst-case block time) — gated on the ISR re-measurement above.
-  - *Sleep timer*: long-press cycles 5/15/30/60/off minutes; on expiry, fade `filter_k` and all voice gates
-    to 0 over the same ~45 ms curve `BTN_PLAY`'s pause already uses, then freeze timers. Main-loop only
-    (a counter compared against `fm1_ms`) — zero ISR risk, ships without waiting on any measurement.
-  - Reverb size is the better *sound* feature; sleep timer is lower-risk and fits "sits on a shelf" more
-    literally. They don't have to compete for the same knob if `ENC_KNOB4` takes one and a long-press on a
-    different control (e.g. `ENC_PRESETS`) takes the other — needs a call before implementing either.
+- **`ENC_KNOB4` — sleep timer. Decided (2026-10-31), fork resolved**: long-press cycles 5/15/30/60/off
+  minutes (a continuous turn with no press changes nothing — this is a press-to-cycle control, not a
+  continuous one, unlike the other knobs). On expiry, fade `filter_k` and all voice gates to 0 over the same
+  ~45 ms curve `BTN_PLAY`'s pause already uses, then freeze timers the same way pause does. Main-loop only
+  (a counter compared against `fm1_ms`) — zero ISR risk, ships without waiting on the ISR re-measurement
+  above. Fits "sits on a shelf and drifts" literally; doubles as a night-lamp-style auto-off.
+  Reverb size/damping (the other half of the original fork) is deferred, not dropped — see "Out of scope /
+  not yet decided" below; it still needs the ISR re-measurement first and can take a different control later
+  (e.g. `ENC_PRESETS`'s own long-press) without conflicting with this.
 - **`ENC_PRESETS` — step through 4 saved "moods"**: turning it increments/decrements a `preset_index` (0–3)
   and immediately loads that slot's `{scale, density, drift, color, drone_on}` into `set` (today's single-slot
   struct, same shape, stored 4× instead of once). Uses 4 of the platform's existing 8 flash slots (`store.h`),
@@ -198,7 +195,7 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
 
 - **Automatic soft-focus LFO** (deferred in v1): slow modulation (0.1–0.5 Hz) on filter cutoff and amplitude, independent per voice, adds the mission's "slow LFO drift" as an automatic layer.
 - **Spectral balancing**: re-measure ISR on hardware post-harmonics, then adjust harmonic levels or envelope shape to hit the ROADMAP targets (envelope range 15+ dB, centroid 350–500 Hz). Current: 7.7 dB and 236 Hz respectively.
-- **Reverb size control** (if ISR measurement permits): a knob to shrink/enlarge the reverb space without a separate wet/dry (single parameter, simpler).
+- **Reverb size/damping control** (if ISR measurement permits): a knob scaling the feedback/damping coefficient in `comb_step()` (`firmware/src/reverb.h`) rather than a true resize (fixed-length delay buffers can't resize at runtime). No control assigned yet — `ENC_KNOB4` went to the sleep timer instead (Control and interface, above); candidates are `ENC_PRESETS`'s long-press or a future encoder if the panel gains one.
 
 ### Ecosystem
 
