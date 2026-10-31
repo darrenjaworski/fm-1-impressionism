@@ -187,6 +187,39 @@ int main(void)
               "average wait time drops as density rises, 0 (sparsest) through 3 (densest)");
     }
 
+    /* Seam E: the register limit (clamp_register). The drone's home stays within -12..+12 semitones of the scale root,
+       a chord root within -12..+19. A degree moves toward 0 until its semitone is in range; one already in range is
+       unchanged. Literals below were worked out by hand and checked with a separate Python version of the scale table. */
+    {
+        uint32_t s;
+        int32_t d, bad_home = 0, bad_root = 0, bad_keep = 0, no_fit = 0;
+        for (s = 0; s < SCALE_COUNT; s++)
+            for (d = -40; d <= 40; d++) {
+                int32_t h = clamp_register(s, d, -12, 12), r = clamp_register(s, d, -12, 19);
+                int32_t sh = scale_degree_to_semitone(s, h), sr = scale_degree_to_semitone(s, r);
+                int32_t sd = scale_degree_to_semitone(s, d);
+                if (sh < -12 || sh > 12) bad_home = 1;
+                if (sr < -12 || sr > 19) bad_root = 1;
+                if (sd >= -12 && sd <= 12 && h != d) bad_keep = 1;
+                if (sd >= -12 && sd <= 19 && r != d) bad_keep = 1;
+                if (fit_mask(s, h) == 0u || fit_mask(s, r) == 0u) no_fit = 1;
+            }
+        check(!bad_home, "clamp_register at -12..+12: every scale, degrees -40..+40, lands in range");
+        check(!bad_root, "clamp_register at -12..+19: every scale, degrees -40..+40, lands in range");
+        check(!bad_keep, "clamp_register: a degree already in range comes back unchanged");
+        check(!no_fit, "clamp_register: every clamped degree still has a fitting chord template");
+    }
+    check(clamp_register(SCALE_PENTATONIC, 10, -12, 12) == 5, "pentatonic degree 10 (+24 st) clamps to degree 5 (+12 st)");
+    check(clamp_register(SCALE_PENTATONIC, -10, -12, 12) == -5, "pentatonic degree -10 (-24 st) clamps to degree -5 (-12 st)");
+    check(clamp_register(SCALE_WHOLETONE, 12, -12, 12) == 6, "whole-tone degree 12 (+24 st) clamps to degree 6 (+12 st)");
+    check(clamp_register(SCALE_PENTATONIC, 9, -12, 19) == 8, "pentatonic degree 9 (+21 st) clamps to degree 8 (+19 st) at -12..+19");
+    check(clamp_register(SCALE_PENTATONIC, 6, -12, 19) == 6, "pentatonic degree 6 (+14 st) is inside -12..+19, unchanged");
+    check(clamp_register(SCALE_LYDIAN, 20, -12, 12) == 7, "Lydian degree 20 (+35 st) clamps to degree 7 (+12 st)");
+    check(clamp_register(SCALE_LYDIAN, 20, -12, 19) == 11, "Lydian degree 20 (+35 st) clamps to degree 11 (+19 st) at -12..+19");
+    check(clamp_register(SCALE_PENTATONIC, -8, -12, 12) == -5, "pentatonic degree -8 (-20 st) clamps to degree -5 (-12 st)");
+    check(clamp_register(SCALE_DORIAN, 3, -12, 12) == 3, "Dorian degree 3 (+5 st) is inside -12..+12, unchanged");
+    check(clamp_register(SCALE_PENTATONIC, 0, -12, 12) == 0, "degree 0 is its own register (the root)");
+
     printf("planing: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }

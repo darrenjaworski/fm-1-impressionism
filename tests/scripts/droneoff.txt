@@ -1,0 +1,4 @@
+# Drone off: BTN_ARP (id 10 on the FM-1) at 1 s turns the drone off, and the colour voices carry on. 3 minutes,
+# as long.txt, so the colour notes play. tests/wav_check.py checks the render for clipping and silence.
+1000 btn 10
+180000 end

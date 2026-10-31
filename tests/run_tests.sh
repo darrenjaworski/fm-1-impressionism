@@ -27,18 +27,31 @@ run "SMK-37 app on the host: the default script" env BOARD=smk37 sh tests/run_ho
 run "FM-1 MIDI: USB, the TRS jack, a clock, the channel (platform-level only, v1 ignores all of it)" sh tests/run_host.sh tests/scripts/midi.txt
 run "SMK-37: velocity, a pad, an outer key, the pitch wheel (platform-level only, v1 ignores all of it)" env BOARD=smk37 sh tests/run_host.sh tests/scripts/smk37.txt
 
+# Audio checks (tests/wav_check.py, stdlib only): each engine script is rendered on the host, then its WAV is checked for
+# clipping and silence, and for a window that must sit well below another (the pause). Then long.txt is rendered again
+# and must come out byte-identical: the render is deterministic, so any difference is a real change.
+audio() { what=$1; script=$2; shift 2; echo "== $what"; sh tests/run_host.sh "tests/scripts/$script.txt" && python3 tests/wav_check.py build/host/impressionism.wav "$@" || fail=1; }
+audio "FM-1 long.txt, 3 minutes: no clipping, not silent" long
+cp build/host/impressionism.wav "$OUT/long_a.wav" || fail=1
+run "FM-1 long.txt rendered again: byte-identical WAV" sh -c "sh tests/run_host.sh tests/scripts/long.txt >/dev/null && cmp '$OUT/long_a.wav' build/host/impressionism.wav && echo identical"
+audio "FM-1 pause.txt: no clipping, not silent, and the last second of the pause (24-25 s) 40 dB below the second before it (19-20 s)" pause --drop 24:25 19:20 40
+audio "FM-1 scales.txt: no clipping, not silent, through all six scales" scales
+audio "FM-1 droneoff.txt, 3 minutes with the drone off: no clipping, not silent" droneoff
+
 $CC -DBOARD_SMK37=1 -Ifirmware/hal -o "$OUT/smk_flash_test" tests/smk_flash_test.c
 run "SMK-37 flash map: settings, blobs, owner tag, slots in the store; never the head, BTIF/USRTRIM, USR, key_mac" "$OUT/smk_flash_test"
 $CC -o "$OUT/smk_wheel_test" tests/smk_wheel_test.c
 run "SMK-37 pitch wheel: the bend is back to 0 at rest, however slowly the wheel was moved" "$OUT/smk_wheel_test"
+$CC -o "$OUT/synth_test" tests/synth_test.c
+run "the synthesis helpers: sine, the phase-step table, note_to_inc, pitch_drift at the top step" "$OUT/synth_test"
 $CC -o "$OUT/planing_test" tests/planing_test.c
-run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
+run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler, the register limit" "$OUT/planing_test"
 $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: water colour, bloom palette, bloom density, pad wander, water shimmer, layout" "$OUT/scene_test"
 $CC -o "$OUT/status_test" tests/status_test.c
 run "the status-text overlay's pure logic: every scale, drone, density and knob line fits the 240 px row" "$OUT/status_test"
 $CC -o "$OUT/reverb_test" tests/reverb_test.c
-run "Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, deterministic, bounded" "$OUT/reverb_test"
+run "Schroeder reverb: deterministic, bounded, T60 by the T30 method, a sustained full-scale input" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
 run "voice envelope: attack, exponential release, quiet threshold" "$OUT/envelope_test"
 

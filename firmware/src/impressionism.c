@@ -39,9 +39,10 @@ static void app_idle(void) {}                   /* nothing to do while the scree
                                                      ~57.6 KB of the 336 KB pool, comfortably within budget. */
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
+#include "synth.h"                              /* sine, the phase step table, note_to_inc, pitch_drift */
 #include "scene.h"                              /* the reactive pixel-art lily pond */
 #include "status.h"                             /* the status text under the pond: scale, drone, density, knobs */
-#include "reverb.h"                             /* Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, ~4.5 s tail */
+#include "reverb.h"                             /* Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, T60 about 2.7 s */
 #include "envelope.h"                           /* per-note attack and release for the colour voices */
 
 #ifndef ISR_TIMING
@@ -60,7 +61,7 @@ static struct {
     volatile int32_t amp;                       /* the level now: glides to gate, no clicks; shared ISR/main */
     uint32_t ph;
     uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
-    uint32_t lfo_ph;                            /* slow pitch drift: ~+-11 cents, once per block (see app_audio) */
+    uint32_t lfo_ph;                            /* slow pitch drift: ~+-13.5 cents at full swing, once per block (see synth.h) */
 } voice[NV];
 /* each voice's place in the stereo field (Q15): the drone sits centre, the colour voices lean left, right and centre */
 static const int32_t pan_l[NV] = { 32767, 32767, 12000, 22000 };
@@ -94,15 +95,6 @@ static volatile uint32_t isr_max_ticks;         /* worst app_audio time seen, in
 static volatile int32_t filter_k = 16384;        /* ENC_KNOB2: 1024 (dark) .. 32768 (fully open) */
 static int32_t lp_l, lp_r;                       /* the one-pole filter's own state (audio ISR only) */
 
-static int32_t sine(uint32_t ph)                /* a full cycle over 2^32 -> -32767..32767 (a refined parabola, ~0.1 %) */
-{
-    int32_t x = (int32_t)ph >> 16, ax = x < 0 ? -x : x, y, ay;
-    y = (x * (32768 - ax)) >> 13;               /* 4x(1-|x|), Q15 */
-    ay = y < 0 ? -y : y;
-    y += ((((y * ay) >> 15) - y) * 7373) >> 15; /* + 0.225 (y|y| - y) */
-    return y > 32767 ? 32767 : y < -32767 ? -32767 : y;
-}
-
 static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t v, i;
@@ -115,7 +107,7 @@ static void app_audio(int32_t *out, uint32_t n)
         uint32_t ph_d, step_d;
         int32_t drift;
         voice[v].lfo_ph += lfo_inc[v];
-        drift = ((int32_t)(voice[v].inc >> 10) * sine(voice[v].lfo_ph)) >> 12;
+        drift = pitch_drift(voice[v].inc, sine(voice[v].lfo_ph));
         step = voice[v].inc + (uint32_t)drift;
         ph_d = voice[v].ph_detune;
         step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
@@ -145,7 +137,7 @@ static void app_audio(int32_t *out, uint32_t n)
         voice[v].ph = ph;
         voice[v].ph_detune = ph_d;
     }
-    /* the space: Schroeder reverb on the mono sum (4 damped combs + 2 feedback combs, ~4.5 s tail) */
+    /* the space: Schroeder reverb on the mono sum (4 damped combs + 2 feedback combs, T60 about 2.7 s) */
     for (i = 0; i < n; i++) {
         int16_t wl, wr;
         int32_t mono = (out[2u * i] + out[2u * i + 1u]) >> 1;
@@ -169,20 +161,14 @@ static void app_audio(int32_t *out, uint32_t n)
 }
 
 /* ---- the generative engine (main loop): plans the next chord/root and sets the voices' inc/gate */
-static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9); lower octaves shift right */
-    815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
-    1153098554u, 1221665363u, 1294309365u, 1371273005u, 1452813141u, 1539201906u};
 #define ROOT_BASE_NOTE 48u                      /* C3-ish: a sensible register for a drone, tune by ear later */
-#define DEGREE_MIN (-12)
-#define DEGREE_MAX 12                            /* keeps the random walk in a musical register, not runaway */
-
-static uint32_t note_to_inc(int32_t note)
-{
-    if (note < 0) note = 0;
-    if (note > 120) note = 120;                 /* the table's reach (INC_C9 >> 10..0) */
-    return INC_C9[(uint32_t)note % 12u] >> (10u - (uint32_t)note / 12u);
-}
-static int32_t clamp_degree(int32_t d) { return d < DEGREE_MIN ? DEGREE_MIN : d > DEGREE_MAX ? DEGREE_MAX : d; }
+/* register limits, in semitones above the scale's root (planing.h's clamp_register). Drone: ROOT_BASE_NOTE - 12 plus
+   -12..+12 gives notes 24..48. Chord root: ROOT_BASE_NOTE plus -12..+19 gives 36..67, and its top voice (at most
+   +15 above the root, quartal) stays at note 82 or below. */
+#define HOME_MIN_ST (-12)
+#define HOME_MAX_ST 12
+#define ROOT_MIN_ST (-12)
+#define ROOT_MAX_ST 19
 
 static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
 #if SEED_SHOW && !defined(DINGHY_HOST)
@@ -204,8 +190,11 @@ static void retune_drone(uint32_t scale)
 /* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
 static void replane(uint32_t scale, uint32_t density, uint32_t drift)
 {
-    plane_degree = clamp_degree(plan_next(plane_degree, drift, &engine_rng));
-    chord_templ = pick_chord(scale, home_degree + plane_degree, &engine_rng);
+    int32_t walked, root;
+    walked = plan_next(plane_degree, drift, &engine_rng);
+    root = clamp_register(scale, home_degree + walked, ROOT_MIN_ST, ROOT_MAX_ST);
+    plane_degree = root - home_degree;
+    chord_templ = pick_chord(scale, root, &engine_rng);
     next_plane_ms = fm1_ms + next_trigger_ticks(density, &engine_rng);
 }
 
@@ -214,7 +203,8 @@ static void replane(uint32_t scale, uint32_t density, uint32_t drift)
    size and resetting the chord back onto the new root when it moves (flagged design choice, see ROADMAP.md) */
 static void reroot(uint32_t scale, uint32_t drift)
 {
-    home_degree = clamp_degree(plan_next(home_degree, drift, &engine_rng));
+    int32_t walked = plan_next(home_degree, drift, &engine_rng);
+    home_degree = clamp_register(scale, walked, HOME_MIN_ST, HOME_MAX_ST);
     plane_degree = 0;
     chord_templ = pick_chord(scale, home_degree, &engine_rng);
     retune_drone(scale);

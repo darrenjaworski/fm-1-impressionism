@@ -39,6 +39,19 @@ static int32_t scale_degree_to_semitone(uint32_t scale, int32_t degree)
     return oct * 12 + SCALE_TABLE[scale].st[d];
 }
 
+/* the register limit: the nearest degree to `degree` on the way to 0 whose semitone (scale_degree_to_semitone) lies in
+   lo_st..hi_st. Steps one degree at a time toward 0, so a degree already in range is returned unchanged. The bounds
+   must include 0, which makes this stop at 0 at the latest. */
+static int32_t clamp_register(uint32_t scale, int32_t degree, int32_t lo_st, int32_t hi_st)
+{
+    int32_t st;
+    for (;;) {
+        st = scale_degree_to_semitone(scale, degree);
+        if (degree == 0 || (st >= lo_st && st <= hi_st)) return degree;
+        degree += degree > 0 ? -1 : 1;
+    }
+}
+
 /* e detents from this scale (either way, any size), wrapping through all SCALE_COUNT scales */
 static uint32_t scale_step(uint32_t scale, int32_t e)
 {

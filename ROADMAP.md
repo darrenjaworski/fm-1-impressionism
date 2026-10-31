@@ -82,13 +82,13 @@ palette has no separate warm tone to shift toward).
 
 What the music drives (v1), and what it deliberately does not:
 
-| Drives                                | Affects                                                                    |
-| ------------------------------------- | -------------------------------------------------------------------------- |
-| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)     |
-| a chord-change event                  | lily-pad bloom colour shift, at that instant                               |
+| Drives                                | Affects                                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `ENC_KNOB2` (color), continuous       | water brightness, dark blue to lit blue-teal (not a temperature shift)                    |
+| a chord-change event                  | lily-pad bloom colour shift, at that instant                                              |
 | `ENC_ALGORITHM` (density), continuous | how many lily pads bloom purple: ~3/4 at density 0, 1/8 at density 3 (fewer green lilies) |
-| nothing (always on)                   | the water's flow, the pads' tiny wander                                    |
-| nothing (by design)                   | `BTN_ARP`, `ENC_KNOB1` (drift) and every other control never move the pond |
+| nothing (always on)                   | the water's flow, the pads' tiny wander                                                   |
+| nothing (by design)                   | `BTN_ARP`, `ENC_KNOB1` (drift) and every other control never move the pond                |
 
 ## Deferred to later versions
 
@@ -105,7 +105,7 @@ Everything in the mission not covered above, to add incrementally:
 
 ## Out of scope / not yet decided for any version
 
-- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 parallel damped combs → 2 series feedback combs, ~4.5 s tail below 1 kHz) is stable. Measured worst audio ISR block on the FM-1: **1.3 ms** (budget 2.9 ms, 2026-10-31, with harmonics and stereo; it was 0.6 ms before those; build with `ISR_TIMING=1` to show it on screen). Re-measure after any per-sample change.
+- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 parallel damped combs → 2 series feedback combs, T60 about 2.7 s, measured by the T30 method in `tests/reverb_test.c`) is stable. Measured worst audio ISR block on the FM-1: **1.3 ms** (budget 2.9 ms, 2026-10-31, with harmonics and stereo; it was 0.6 ms before those; build with `ISR_TIMING=1` to show it on screen). Re-measure after any per-sample change.
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
 ## Deferred items — done (2026-10-30 session 2)
@@ -141,9 +141,11 @@ Host renders, 3 minutes at default settings, first 15 s skipped. Targets are fro
 | Clipped samples                  | 802    | 0      | 0             |
 
 What changed to get here: colour notes attack, hold and release (`envelope.h`); the drone an octave lower and
-about 6 dB under the colour voices; a slow ~11-cent pitch drift per voice; a 2nd to 6th harmonic on each voice,
+about 6 dB under the colour voices; a slow pitch drift per voice (up to about 13.5 cents); a 2nd to 6th harmonic on each voice,
 scaled by the note's level; and a fixed stereo place per colour voice. Still open: the envelope range and centroid
 are short of target.
+
+The "Now" column predates the Stage 2 changes (the register limits and the drift fix) and has not been re-measured since.
 
 ## Next scope (v2+)
 
@@ -162,6 +164,10 @@ Done in code and host tests (`tests/planing_test.c`, `tests/scripts/scales.txt`)
   for the new root, so a chord never sits on a root it does not fit. Every degree of every scale has at least one.
 - **Whole-tone** loses maj7 and add9, and none of the first six templates fits it at any degree. It uses 9no5 and
   aug9 only, the two shapes that fit.
+- **Register limits** (`planing.h`'s `clamp_register`, `impressionism.c`'s `HOME_*_ST` and `ROOT_*_ST`), in semitones
+  above the scale's root: the drone's root stays within -12..+12, so the drone plays notes 24..48. A chord root stays
+  within -12..+19, so chord roots are notes 36..67 and the top voice (at most +15 above its root) is note 82 or below.
+  Before this, both limits were ±12 scale degrees, a different span in each scale.
 - **Scales**: 6 in total: whole-tone, pentatonic, minor pentatonic (0,3,5,7,10), Lydian (0,2,4,6,7,9,11), Mixolydian
   (0,2,4,5,7,9,10), Dorian (0,2,3,5,7,9,10). **Fixes the fmhub.json claim** ("extended and quartal chords").
 - **`ENC_SELECT`** cycles through the 6 scales in both directions (`scale_step()`), with any number of detents. The

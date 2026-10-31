@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Schroeder reverb: 4 parallel damped combs → 2 series feedback combs, mono in, stereo out.
-   Decay ~4.5 s below 1 kHz, ~1.5 s at 1.8 kHz; permanent DC offset of ~-18 from rounding. */
+   T60 about 2.7 s (T30 method, 200 Hz burst, tests/reverb_test.c; 2.1 to 3.8 s across 100-900 Hz and window sizes),
+   2.1 s at 1.8 kHz. Permanent DC offset of about -18 from rounding. */
 
 #ifndef REVERB_H
 #define REVERB_H
