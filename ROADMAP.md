@@ -1,15 +1,19 @@
 # Roadmap
 
 This is the versioned plan for the generative-ambient engine itself (`firmware/src/impressionism.c`), on top of
-the mission and conventions already fixed in `CLAUDE.md`. It follows this repo's SemVer convention: v1 below is a
-deliberately narrow first slice, not the full mission palette — later minor versions expand it.
+the mission and conventions already fixed in `CLAUDE.md`. No version ceiling: release tags are timestamp-based
+(`0.0.1-{unix_timestamp}-{short_sha}`), and v1 below is a deliberately narrow first slice, not the full mission
+palette — later releases expand it.
 
 v1 was scoped in a `/grill-me` session; one default below was made by the agent from `CLAUDE.md`'s mission text
 rather than an explicit answer, and is flagged as such.
 
 **Status**: the audio engine below (drone + 3 chord voices, both timers, panel mapping, persistence) is
-implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via a CI-built `.fwsc`, and
-**confirmed working by ear**. The reactive pixel-art screen below is built (Monet palette, see below), pending a by-eye check on hardware.
+implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via CI-built `.fwsc` packages, and
+**confirmed working by ear on the real hardware**. The reactive pixel-art screen is built (Monet palette, Monet
+palette, see below), **confirmed working on the FM-1 display**. The Pages emulator is live and working. Remaining
+before public Hub submission: measure ISR time post-harmonics, verify identity `FM-1_95N` against Hub catalogue,
+complete the feature set per v2 below.
 
 ## Initial scope (v0.0.1)
 
@@ -87,7 +91,7 @@ Everything in the mission not covered above, to add incrementally:
 
 ## Out of scope / not yet decided for any version
 
-- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 combs + 2 allpasses, ~7 s tail) replaces the old diffuser; measured worst audio ISR block on the FM-1 with it in: 0.6 ms (budget 2.9 ms, `ISR_TIMING=1` shows it on screen).
+- A reverb with feedback or a wet/dry knob. The fixed Schroeder reverb (`firmware/src/reverb.h`, 4 parallel damped combs → 2 series feedback combs, ~4.5 s tail below 1 kHz) is stable. Measured worst audio ISR block on the FM-1 before harmonics: 0.6 ms (budget 2.9 ms, `ISR_TIMING=1` shows it on screen). **Needs re-measurement post-harmonics** (each voice now does 7 sine calls per sample).
 - Hub submission (identity `FM-1_95N` is provisional — unverified against the Hub's live catalogue; see `CLAUDE.md`).
 
 ## Deferred items — done (2026-10-30 session 2)
@@ -127,10 +131,37 @@ about 6 dB under the colour voices; a slow ~11-cent pitch drift per voice; a 2nd
 scaled by the note's level; and a fixed stereo place per colour voice. Still open: the envelope range and centroid
 are short of target.
 
-## An online playable version on this repo's GitHub Pages — done (2026-10-30)
+## Next scope (v2+)
 
-Goal: a browser-playable emulator hosted at this repo's own GitHub Pages, like
-[charlesvestal.github.io/fm1-amb/emu/](https://charlesvestal.github.io/fm1-amb/emu/). Live at
+**Feature and sound improvements**, each cheap enough to ship incrementally:
+
+### Chord and scale expansion
+
+- **Chord templates**: add sus2 (+2, +7, +12), sus4 (+5, +7, +12), 6/9 (+4, +7, +9), and quartal (+5, +12, +17), bringing the template count to 6. Each retrigger still picks one at random. Tests in `tests/planing_test.c`.
+- **Scales**: add minor pentatonic, Lydian, Mixolydian, Dorian (4 new scales, 6 total). ENC_SELECT cycles through them instead of toggling. **Fixes the fmhub.json claim** ("extended and quartal chords") — currently only maj7/add9 exist.
+- **Common-tone voice leading**: after replanning, favour chord templates that share tones with the outgoing one. This formalizes the mission's "parallel planing / common-tone motion" as motion rules, not just random walks.
+
+### Control and interface
+
+- **Key selection**: any of the 27 keys (F3–G5) sets the drone root, a macro control (not note-by-note performance). Overrides the random walk; the drone stays there until another key is pressed or a timer re-randomizes it. Fits the mission and opens live performance options.
+- **Presets**: save/recall 4 named "moods" (scale, density, drift, color, drone-on) to slots. Quick A/B testing without the SAVE button ceremony.
+- **Sleep timer**: `ENC_KNOB2` long-press enters a "sleep" mode: fade to silence over N minutes (5/15/30/60 or off). Fits "sits on a shelf and drifts"; useful as a night lamp.
+
+### Sound and measurement
+
+- **Automatic soft-focus LFO** (deferred in v1): slow modulation (0.1–0.5 Hz) on filter cutoff and amplitude, independent per voice, adds the mission's "slow LFO drift" as an automatic layer.
+- **Spectral balancing**: re-measure ISR on hardware post-harmonics, then adjust harmonic levels or envelope shape to hit the ROADMAP targets (envelope range 15+ dB, centroid 350–500 Hz). Current: 7.7 dB and 236 Hz respectively.
+- **Reverb size control** (if ISR measurement permits): a knob to shrink/enlarge the reverb space without a separate wet/dry (single parameter, simpler).
+
+### Ecosystem
+
+- **MIDI out**: send the generated notes on MIDI channel 1 (note on/off, pitch bend for drift). Allows recording in a DAW or driving other synths.
+- **Battery indicator**: display voltage on the status line (below the screen text); fade volume at <15% to warn before shutdown.
+- **fmhub.json completion**: add "play" (the Pages URL), "image" (docs/screen.png), and "cheat" (a one-page PDF of panel controls).
+
+## Pages emulator and workflow — done (2026-10-30)
+
+Goal: a browser-playable version at this repo's GitHub Pages. Live at
 <https://darrenjaworski.github.io/fm-1-impressionism/>.
 
 **What it is**: [joakimeriksson/fm1-emu](https://github.com/joakimeriksson/fm1-emu) (GPL-3.0), a **generic** FM-1
@@ -143,24 +174,5 @@ both be far larger undertakings than this needed to be). `fm1-emu` sidesteps tha
 `.fwsc` directly, no source port of this firmware required. (The other generic candidate considered,
 `shcherbakov7/m-wave-fm1-browser-emulator`, was smaller/less documented at research time — not used.)
 
-**How it's wired up** (`.github/workflows/pages.yml`, `site/firmwares.json`): on every push to `site/**` and on
-every published release, the workflow checks out this repo and `fm1-emu` at a pinned commit (`FM1_EMU_REF`) side
-by side, builds `fm1-emu`'s own `web/build.sh` (the same one its own CI calls, via `tools/build_site.sh`, minus
-the SMK-37/`fm1-sid` submodule parts this project doesn't need), fetches this repo's latest FM-1 `.fwsc` release
-asset and copies it in as a stable `impressionism.fwsc`, overwrites the built page's `firmwares.json` with this
-project's own single-firmware catalog (`site/firmwares.json`, `"default": "impressionism"`), and publishes that
-as the Pages site. The emulator's own source is never committed to this repo's git history — built fresh from
-source every deploy, credited in `LICENSING.md`, same reasoning as not vendoring the JieLi SDK.
+**Workflow status**: the workflow is complete and working. On every push to `site/**` and every published release, `.github/workflows/pages.yml` builds `fm1-emu` at the pinned commit (`FM1_EMU_REF`), copies this repo's latest `.fwsc`, overwrites the emulator's `firmwares.json` with this project's catalog, and publishes to GitHub Pages. `FM1_EMU_REF` is updated manually, not automatically — fine for now.
 
-**Not yet done**: bumping `FM1_EMU_REF` is a manual, deliberate action (no auto-update) — fine for now, revisit
-if `fm1-emu` ships something this project wants sooner.
-
-**Blocked, not done:** writing this into `.github/workflows/pages.yml` was refused by Claude Code's own
-auto-mode classifier ("Untrusted Code Integration") — checking out and compiling a third party's source as
-part of this repo's CI is a real supply-chain-risk pattern worth a human's explicit sign-off, and that wasn't
-routed around. **A human needs to either grant that permission and ask again, or write the workflow directly**
-from the steps above (every file/step/URL needed is spelled out here; nothing else to research first).
-
-## claude tooling
-
-- skill to make running local web emulator from a local firmware build
