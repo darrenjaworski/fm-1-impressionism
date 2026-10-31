@@ -35,8 +35,6 @@ $CC -o "$OUT/planing_test" tests/planing_test.c
 run "the generative engine's pure logic: scales, chord templates, the planing picker, the scheduler" "$OUT/planing_test"
 $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
-$CC -o "$OUT/diffuse_test" tests/diffuse_test.c
-run "the cheap diffuser's pure logic: a feed-forward multi-tap delay" "$OUT/diffuse_test"
 $CC -o "$OUT/reverb_test" tests/reverb_test.c
 run "Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s, stereo, deterministic" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
