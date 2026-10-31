@@ -71,8 +71,8 @@ int main(void)
     {
         uint32_t total = 40u, c0 = active_cell_count(0u, total), c1 = active_cell_count(1u, total),
                  c2 = active_cell_count(2u, total), c3 = active_cell_count(3u, total);
-        check(c0 >= 1u, "density 0 still lights at least one pad");
-        check(c0 < c1 && c1 < c2 && c2 < c3, "active count rises strictly with density");
+        check(c3 >= 1u, "density 3 still lights at least one pad");
+        check(c0 > c1 && c1 > c2 && c2 > c3, "active count falls strictly with density: the densest setting shows the most green lilies");
         check(c3 <= total, "never more active cells than exist");
     }
 

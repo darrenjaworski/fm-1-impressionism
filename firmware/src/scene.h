@@ -69,13 +69,13 @@ static rgb_t chord_templ_to_bloom_rgb(uint32_t templ)
     return c;
 }
 
-/* ENC_ALGORITHM (density), 0..3 -> how many of the pond's "pad" cells read as active/lit, out of some total.
-   Roughly an eighth at density 0 (never zero: a totally dark pond reads as dead, not sparse), up to roughly
-   two-thirds at density 3. Tune by eye once this is on the real screen. */
+/* ENC_ALGORITHM (density), 0..3 -> how many of the pond's "pad" cells read as active/lit (purple blooms), out of
+   some total. Sparsest density blooms the most pads, so the densest setting leaves more green lilies showing:
+   about three-quarters at density 0, down to an eighth at density 3 (never zero: a totally dark pond reads as
+   dead, not sparse). Tune by eye once this is on the real screen. */
 static uint32_t active_cell_count(uint32_t density, uint32_t total)
 {
-    static const uint32_t EIGHTHS[4] = { 1u, 2u, 4u, 6u };   /* 1/8, 1/4, 1/2, 3/4 of total -- clear separation
-                                                                 at any realistic total, not just a tested one */
+    static const uint32_t EIGHTHS[4] = { 6u, 4u, 2u, 1u };   /* 3/4, 1/2, 1/4, 1/8 of total */
     uint32_t n = total * EIGHTHS[density] / 8u;
     return n < 1u ? 1u : n;
 }
