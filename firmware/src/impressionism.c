@@ -347,6 +347,7 @@ static void app_main(void)
     if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
         set.color > 31u || set.drone_on > 1u)
         set_defaults();
+    engine_rng = fm1_ms ? fm1_ms : 1u;             /* seed with boot time for unique sequences each startup */
     filter_k = color_to_filter_k(set.color);
     init_pond();                                  /* the pond's layout is fixed; count its pads once */
     reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
