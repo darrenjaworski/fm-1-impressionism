@@ -46,21 +46,22 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #define ISR_TIMING 0                            /* 1: show the audio ISR's worst block time on screen (RULES.md: stay under 2.9 ms) */
 #endif
 
-#include "envelope.h"
-
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
 #define NV 4u                                   /* 0 = drone, 1..3 = the chord's colour tones */
 static struct {
     volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 */
-    int32_t amp;                                /* the level now, Q8 (converted from envelope) */
+    volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
+    int32_t amp;                                /* the level now: glides to gate, no clicks */
     uint32_t ph;
     uint32_t ph_detune;                         /* the second, slightly sharp partial (see app_audio) */
 } voice[NV];
+#define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
 
-static env_t env[NV];                           /* per-voice envelope for articulation */
-static volatile uint32_t mute;                  /* 1: fade all voices to silence over ~30ms, used by BTN_PLAY pause */
-
-#define GATE_FULL 8000                          /* peak amplitude for fade-in */
+/* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
+   block at 256 frames/44.1 kHz -- sized for a few seconds each (soft-focus, CLAUDE.md's Mission), tune by ear
+   once this is heard on real hardware. Reduced for dreamier character: slower, more sustain. */
+#define ATTACK_STEP 8                           /* ~5.8 s, 0 -> GATE_FULL (slower fade-in) */
+#define RELEASE_STEP 5                          /* ~9.4 s, GATE_FULL -> 0 (slower fade-out) */
 
 #ifdef DINGHY_HOST
 static int16_t diff_buf[DIFF_LEN];              /* host build: plain memory (the .pool section is ELF-only, see gfx.c) */
