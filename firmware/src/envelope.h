@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#define ENV_FULL 32640u                         /* Q8 full level = GATE_FULL * 4 */
+#define ENV_FULL 32640u                         /* Q8 full level: 127.5 (32640 / 256) */
 #define ENV_ATTACK_STEP 64u                     /* Q8 per block: ~3 s to full */
 #define ENV_DECAY_SHIFT 7                       /* release: level -= level >> 7 per block, ~5 s to 60 dB down */
 #define ENV_QUIET_THRESHOLD 32u                 /* below this (Q8) the voice counts as quiet and may retrigger */

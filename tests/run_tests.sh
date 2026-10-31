@@ -54,6 +54,8 @@ $CC -o "$OUT/reverb_test" tests/reverb_test.c
 run "Schroeder reverb: deterministic, bounded, T60 by the T30 method, a sustained full-scale input" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
 run "voice envelope: attack, exponential release, quiet threshold" "$OUT/envelope_test"
+$CC -o "$OUT/engine_test" tests/engine_test.c
+run "the generative engine on a fake clock (3 h, 4 seeds, all scales/densities/drifts): notes in scale and register, pause, resume, wrap, note rate by density; and the saved settings" "$OUT/engine_test"
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc

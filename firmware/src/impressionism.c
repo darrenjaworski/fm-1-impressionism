@@ -9,22 +9,27 @@
  *
  *   voice 0   the drone: a sustained root/pedal tone. Re-roots itself on its own slow, independent timer.
  *   voice 1-3 the chord's three colour tones above that root, from one of 8 templates (ROADMAP.md),
- *             each triggered individually when quiet, holding for 2.5-7 s then releasing
+ *             each triggered individually when quiet, holding for a density-dependent time (engine.h), then releasing
+ *
+ * This file is the sound, the input and the screen. The decisions (which notes, when) are in engine.h, which returns
+ * events that apply_events() turns into voice settings here.
  *
  * Panel (ROADMAP.md's agreed mapping):
  *   ENC_SELECT     scale: cycles through 6 (whole-tone, pentatonic, minor pentatonic, Lydian, Mixolydian, Dorian)
- *   ENC_ALGORITHM  density: how often the chord re-planes (0 sparsest .. 3 densest)
+ *   ENC_ALGORITHM  density: how often the chord moves, how soon each colour voice re-enters, and how long its notes
+ *                  hold (0 sparsest .. 3 densest)
  *   ENC_KNOB1      drift rate: how far each re-plane/re-root steps (0 smallest .. 3 widest)
  *   ENC_KNOB2      colour: a one-pole low-pass on the final mix (0 darkest .. 31 fully open)
  *   BTN_ARP        drone on/off
- *   BTN_PLAY       pause/resume: fades all voices out (~45 ms) and freezes every timer; resume restarts them where they stopped
+ *   BTN_PLAY       pause/resume: fades all voices out (~45 ms) and freezes every timer; resume restarts them where they
+ *                  stopped, and a voice with no wait left gets a new random one
  *   all 14 buttons are softly backlit (dim glow layer); ARP and PLAY light fully for "on"
  *   MASTER         volume (platform.c; nothing to do here)
- * scale/density/drift/colour/drone-on persist across power-off; the current wander position does not (it
- * re-randomizes fresh each boot (engine_rng is seeded from boot time and ADC noise) -- only the knob settings are meant to survive, ROADMAP.md).
+ * scale/density/drift/colour/drone-on persist across power-off (settings.h); the engine's position (its wander, the
+ * chord) does not: it is reseeded from the boot time and ADC noise on every boot (ROADMAP.md).
  *
- * The screen is a reactive impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2,
- * lily blooms coloured by the current chord template (and rippling with the water), a slow constant shimmer and a
+ * The screen is an impressionist pixel-art lily pond (ROADMAP.md): water brightness from ENC_KNOB2, lily blooms
+ * coloured by the current chord template and shimmering with the water, a slow constant shimmer and a
  * small brownian drift of the pads that ignore the panel, and how many pads bloom from density (scene.h) -- plus a
  * status-text overlay below it (status.h: the scale name, drone state, density, and the knob values).
  *
@@ -39,8 +44,10 @@ static void app_idle(void) {}                   /* nothing to do while the scree
                                                      ~57.6 KB of the 336 KB pool, comfortably within budget. */
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
+#include "settings.h"                           /* the five saved settings, their defaults and checks */
+#include "engine.h"                             /* the generative engine: what plays and when, as events */
 #include "synth.h"                              /* sine, the phase step table, note_to_inc, pitch_drift */
-#include "scene.h"                              /* the reactive pixel-art lily pond */
+#include "scene.h"                              /* the lily pond */
 #include "status.h"                             /* the status text under the pond: scale, drone, density, knobs */
 #include "reverb.h"                             /* Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, T60 about 2.7 s */
 #include "envelope.h"                           /* per-note attack and release for the colour voices */
@@ -68,8 +75,7 @@ static const int32_t pan_l[NV] = { 32767, 32767, 12000, 22000 };
 static const int32_t pan_r[NV] = { 32767, 12000, 32767, 22000 };
 static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
 static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
-static env_t env[NV];                          /* colour voices 1..3: each note attacks, holds, releases (envelope.h) */
-static uint32_t note_off_ms[NV];               /* when each colour note's gate closes */
+static env_t env[NV - 1u];                     /* colour voices: env[v] is voice[v + 1]. Each note attacks, holds, releases (envelope.h) */
 #define HARM_FUND 22938                         /* the main partial's mix, Q15: fundamental 0.70, 2nd 0.20, 3rd 0.10 (sums to 1) */
 #define HARM_2 6554
 #define HARM_3 3277
@@ -118,8 +124,8 @@ static void app_audio(int32_t *out, uint32_t n)
             if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }
             else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
         } else {
-            env_tick(&env[v], ENV_ATTACK_STEP);
-            amp = env_to_amp(&env[v]);
+            env_tick(&env[v - 1u], ENV_ATTACK_STEP);
+            amp = env_to_amp(&env[v - 1u]);
         }
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
@@ -160,87 +166,42 @@ static void app_audio(int32_t *out, uint32_t n)
 #endif
 }
 
-/* ---- the generative engine (main loop): plans the next chord/root and sets the voices' inc/gate */
-#define ROOT_BASE_NOTE 48u                      /* C3-ish: a sensible register for a drone, tune by ear later */
-/* register limits, in semitones above the scale's root (planing.h's clamp_register). Drone: ROOT_BASE_NOTE - 12 plus
-   -12..+12 gives notes 24..48. Chord root: ROOT_BASE_NOTE plus -12..+19 gives 36..67, and its top voice (at most
-   +15 above the root, quartal) stays at note 82 or below. */
-#define HOME_MIN_ST (-12)
-#define HOME_MAX_ST 12
-#define ROOT_MIN_ST (-12)
-#define ROOT_MAX_ST 19
+/* ---- the generative engine (engine.h) on the main loop: its events, applied to the sound here */
+static engine_t eng;                            /* what plays and when: the drone, the chord, the timers */
+static engine_event_t events[ENGINE_MAX_EVENTS];
 
-static uint32_t engine_rng = 0x9E3779B9u;         /* never 0 (planing.h's xorshift32) */
-#if SEED_SHOW && !defined(DINGHY_HOST)
-static uint32_t boot_seed;                       /* the seed app_main gave engine_rng, shown by draw_seed */
-#endif
-static int32_t home_degree, plane_degree;        /* the drone's root, and the chord's offset above it */
-static uint32_t chord_templ;
-static uint32_t next_plane_ms, next_root_ms;
-static uint32_t next_note_ms[NV];                /* per-voice note-trigger timer: 0=drone, 1-3=colours */
-static int32_t left_plane = 0, left_root = 0;   /* timer state when paused, for clean resume */
-static int32_t left_note_ms[NV];                 /* per-voice timer state when paused */
-
-static void retune_drone(uint32_t scale)
+/* the engine's events, applied to the sound: the drone's pitch, a colour voice's pitch and gate */
+static void apply_events(uint32_t n)
 {
-    int32_t root_note = (int32_t)ROOT_BASE_NOTE - 12 + scale_degree_to_semitone(scale, home_degree);  /* drone: an octave below the chord */
-    voice[0].inc = note_to_inc(root_note);
+    uint32_t i, v;
+    for (i = 0; i < n; i++) {
+        v = events[i].voice;
+        if (events[i].kind == EV_DRONE) {
+            voice[0].inc = note_to_inc(events[i].note);
+        } else if (events[i].kind == EV_NOTE_ON) {
+            voice[v + 1u].inc = note_to_inc(events[i].note);
+            env_gate_on(&env[v]);
+        } else {
+            env_gate_off(&env[v]);
+        }
+    }
 }
 
-/* voice 1-3: re-plane on the density timer (ENC_ALGORITHM) */
-static void replane(uint32_t scale, uint32_t density, uint32_t drift)
+/* bit v is set when colour voice v's envelope is quiet, so the engine may give it a new note */
+static uint32_t quiet_mask(void)
 {
-    int32_t walked, root;
-    walked = plan_next(plane_degree, drift, &engine_rng);
-    root = clamp_register(scale, home_degree + walked, ROOT_MIN_ST, ROOT_MAX_ST);
-    plane_degree = root - home_degree;
-    chord_templ = pick_chord(scale, root, &engine_rng);
-    next_plane_ms = fm1_ms + next_trigger_ticks(density, &engine_rng);
+    uint32_t v, m = 0u;
+    for (v = 0; v < ENGINE_VOICES; v++)
+        if (env_is_quiet(&env[v])) m |= 1u << v;
+    return m;
 }
 
-/* voice 0: re-roots on its own slower, independent timer (not density -- ROADMAP.md says density is "how often
-   the 3 voices retrigger", the drone is deliberately not on that clock), using the same drift_rate for its step
-   size and resetting the chord back onto the new root when it moves (flagged design choice, see ROADMAP.md) */
-static void reroot(uint32_t scale, uint32_t drift)
-{
-    int32_t walked = plan_next(home_degree, drift, &engine_rng);
-    home_degree = clamp_register(scale, walked, HOME_MIN_ST, HOME_MAX_ST);
-    plane_degree = 0;
-    chord_templ = pick_chord(scale, home_degree, &engine_rng);
-    retune_drone(scale);
-    next_root_ms = fm1_ms + 60000u + rng_next(&engine_rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
-}
-
-/* voice 1-3: trigger a new note (attack). Only call when voice is quiet to avoid clicks */
-#define NOTE_MIN_MS 2500u                       /* how long a colour note is held before it releases: 2.5..7 s */
-#define NOTE_RANGE_MS 4500u
-
-static void trigger_note(uint32_t v, uint32_t scale)
-{
-    int32_t chord_note = (int32_t)ROOT_BASE_NOTE + scale_degree_to_semitone(scale, home_degree + plane_degree);
-    voice[v].inc = note_to_inc(chord_note + chord_voice_semitone(chord_templ, v - 1u));
-    env_gate_on(&env[v]);
-    note_off_ms[v] = fm1_ms + NOTE_MIN_MS + rng_next(&engine_rng) % NOTE_RANGE_MS;
-}
-
-/* ---- settings (what survives a power-off, ROADMAP.md) */
-static struct { uint8_t scale, density, drift, color, drone_on; } set;
-static void set_defaults(void)                  /* dreamier: sparse, slow, darker. Field-wise: no struct copy, so no memcpy call */
-{
-    set.scale = SCALE_PENTATONIC; set.density = 0; set.drift = 0; set.color = 12; set.drone_on = 1;
-}
+/* ---- settings (what survives a power-off, settings.h) */
+static settings_t set;
 
 static int32_t color_to_filter_k(uint32_t color) { return 1024 + (int32_t)color * 1024; }   /* 0..31 -> 1024..32768 */
 
-static int quiet(void)
-{
-    uint32_t v;
-    for (v = 0; v < NV; v++)
-        if (voice[v].amp) return 0;
-    return 1;
-}
-
-/* ---- the screen: a reactive pixel-art lily pond (scene.h), plus a small status-text overlay below it */
+/* ---- the screen: a lily pond (scene.h), plus a small status-text overlay below it */
 #define C_ACC RGB(180, 140, 255)
 #define C_OFF RGB(90, 90, 90)
 #define POND_Y 58                               /* screen y where the pond's canvas strip gets blitted */
@@ -252,7 +213,7 @@ static int quiet(void)
 static void draw_pond(void)
 {
     uint32_t x, y, phase = fm1_ms / POND_TICK_MS;
-    rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(chord_templ);
+    rgb_t water = color_to_water_rgb(set.color), bloom = chord_templ_to_bloom_rgb(eng.chord_templ);
     cv_begin(POND_W * CELL_PX, POND_H * CELL_PX, C_BLACK);
     for (y = 0; y < POND_H; y++)                  /* the water: one continuous field of two slow crossing waves */
         for (x = 0; x < POND_W; x++) {
@@ -306,6 +267,7 @@ static void draw_isr_time(void) {}
 #endif
 
 #if SEED_SHOW && !defined(DINGHY_HOST)
+static uint32_t boot_seed;                       /* the seed app_main gave the engine, shown by draw_seed */
 static void draw_seed(void)                     /* the boot seed in hex, on draw_isr_time's line */
 {
     static const char HEX[] = "0123456789ABCDEF";
@@ -322,41 +284,33 @@ static void draw_seed(void) {}
 
 static void app_main(void)
 {
-    uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn = ~0u, next_draw_ms, b, rel, st;
+    uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn, next_draw_ms, b, rel, st, n, v;
+    uint32_t seed = 0x9E3779B9u;                /* host: a fixed seed (never 0) */
     int32_t e;
 
-    if (settings_load(&set, sizeof set) || set.scale >= SCALE_COUNT || set.density > 3u || set.drift > 3u ||
-        set.color > 31u || set.drone_on > 1u)
-        set_defaults();
+    if (settings_load(&set, sizeof set) || !settings_valid(&set))
+        settings_set_defaults(&set);
 #ifndef DINGHY_HOST
     {   /* boot seed: the ms counter, the CPU tick count and two ADC reads (battery, master pot) are mixed together,
            so the start depends on all of them. A timed-out read (-1) is skipped. cell_hash spreads the bits; 0 is
-           never a seed. Checked on the FM-1 with SEED_SHOW: it differs across power-ons. */
-        uint32_t seed = cell_hash(fm1_ms, fm1_ticks());
+           never a seed (engine_init maps it to 1). Checked on the FM-1 with SEED_SHOW: it differs across power-ons. */
         int32_t a;
+        seed = cell_hash(fm1_ms, fm1_ticks());
         if ((a = fm1_adc_read(FM1_ADC_BATT)) >= 0) seed = cell_hash(seed, (uint32_t)a);
         if ((a = fm1_adc_read(FM1_ADC_MASTER)) >= 0) seed = cell_hash(seed, (uint32_t)a);
-        engine_rng = seed ? seed : 1u;
 #if SEED_SHOW
-        boot_seed = engine_rng;
+        boot_seed = seed;
 #endif
     }
 #endif
     filter_k = color_to_filter_k(set.color);
-    reroot(set.scale, set.drift);                /* start with a real root and chord already in place */
-    replane(set.scale, set.density, set.drift);
-    {   /* initialize per-voice note timers: drone re-roots slowly, colour voices trigger freely */
-        uint32_t v;
-        next_note_ms[0] = fm1_ms + 60000u;  /* drone re-roots after 60+ seconds, like reroot */
-        for (v = 1; v < NV; v++)
-            next_note_ms[v] = fm1_ms + next_trigger_ticks(set.density, &engine_rng);
-    }
+    n = engine_init(&eng, seed, &set, fm1_ms, events);   /* a real root and chord already in place, the first waits */
+    apply_events(n);
     draw_chrome();
     draw_pond();
     draw_status();
     scale_drawn = set.scale;
-    state_drawn = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
-                  set.scale << 13u;
+    state_drawn = settings_state_word(&set, eng.chord_templ);
     next_draw_ms = fm1_ms + POND_TICK_MS;                 /* the pond's shimmer redraws on its own slow tick too */
 
     {   /* backlight every button (the FM-1's 14 are ids 0..13; a no-op on the SMK-37). The glow is its own dim layer
@@ -374,81 +328,50 @@ static void app_main(void)
             dirty = 1; t_change = fm1_ms;
         }
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {
-            int32_t d = (int32_t)set.density + e;
-            set.density = (uint8_t)(d < 0 ? 0 : d > 3 ? 3 : d);
+            set.density = knob_apply(set.density, e, 3u);
             dirty = 1; t_change = fm1_ms;
         }
         if ((e = fm1_enc_take(ENC_KNOB1)) != 0) {
-            int32_t d = (int32_t)set.drift + e;
-            set.drift = (uint8_t)(d < 0 ? 0 : d > 3 ? 3 : d);
+            set.drift = knob_apply(set.drift, e, 3u);
             dirty = 1; t_change = fm1_ms;
         }
         if ((e = fm1_enc_take(ENC_KNOB2)) != 0) {
-            int32_t c = (int32_t)set.color + e;
-            set.color = (uint8_t)(c < 0 ? 0 : c > 31 ? 31 : c);
+            set.color = knob_apply(set.color, e, 31u);
             filter_k = color_to_filter_k(set.color);
             dirty = 1; t_change = fm1_ms;
         }
         b = fm1_input_edges(&rel);
         if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
         fm1_led_key(BTN_ARP, set.drone_on);
-        if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation, current notes sustain */
+        if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation; the sound fades out (app_audio) */
             paused ^= 1u;
-            if (paused) {                            /* remember timer state for clean resume */
-                left_plane = (int32_t)(next_plane_ms - fm1_ms);
-                left_root = (int32_t)(next_root_ms - fm1_ms);
-                uint32_t v;
-                for (v = 0; v < NV; v++)
-                    left_note_ms[v] = (int32_t)(next_note_ms[v] - fm1_ms);
+            if (paused) {
+                engine_pause(&eng, fm1_ms);
             } else {
-                next_plane_ms = fm1_ms + (uint32_t)(left_plane > 0 ? left_plane : 0);
-                next_root_ms = fm1_ms + (uint32_t)(left_root > 0 ? left_root : 0);
-                uint32_t v;
-                for (v = 0; v < NV; v++)
-                    next_note_ms[v] = fm1_ms + (uint32_t)(left_note_ms[v] > 0 ? left_note_ms[v] : 0);
+                n = engine_resume(&eng, fm1_ms, &set, events);
+                apply_events(n);
             }
         }
         fm1_led_key(BTN_PLAY, !paused);              /* lit while generating, off while paused */
 
-        if (scale_drawn != set.scale) {          /* the scale changed: reset timers and re-root/plane right away */
-            home_degree = 0; plane_degree = 0;
-            uint32_t v;
-            for (v = 0; v < NV; v++) next_note_ms[v] = fm1_ms;  /* trigger all voices right away */
-            reroot(set.scale, set.drift);
-            replane(set.scale, set.density, set.drift);
+        if (scale_drawn != set.scale) {          /* the scale changed: every voice due now, re-root and re-plane at once */
             scale_drawn = set.scale;
+            n = engine_scale_changed(&eng, fm1_ms, &set, events);
+            apply_events(n);
         }
 
-        /* generation timers (only when not paused) */
-        if (!paused && (int32_t)(fm1_ms - next_root_ms) >= 0) reroot(set.scale, set.drift);
-        if (!paused && (int32_t)(fm1_ms - next_plane_ms) >= 0) replane(set.scale, set.density, set.drift);
+        n = engine_tick(&eng, fm1_ms, &set, quiet_mask(), events);   /* the drone, the chord and each colour voice's notes */
+        apply_events(n);
 
-        /* per-voice note triggering: each colour voice triggers independently when quiet */
-        if (!paused) {
-            uint32_t v;
-            for (v = 1; v < NV; v++) {
-                if (env[v].gate) {
-                    if ((int32_t)(fm1_ms - note_off_ms[v]) >= 0) {
-                        env_gate_off(&env[v]);
-                        next_note_ms[v] = fm1_ms + next_trigger_ticks(set.density, &engine_rng);
-                    }
-                } else if (env_is_quiet(&env[v]) && (int32_t)(fm1_ms - next_note_ms[v]) >= 0) {
-                    trigger_note(v, set.scale);
-                }
-            }
-        }
-
-        /* voice gates: drone controlled by setting, colour voices managed by triggers */
+        /* voice gates: drone controlled by setting, colour voices managed by the engine's notes */
         voice[0].gate = (set.drone_on && !paused) ? DRONE_FULL : 0;
 
-        /* mute during pause: instant silence over ~30ms */
+        /* paused: the envelopes are cleared, so no note comes back on resume (the sound itself fades out in app_audio) */
         if (paused) {
-            uint32_t v;
-            for (v = 1; v < NV; v++) env_init(&env[v]);
+            for (v = 0; v < ENGINE_VOICES; v++) env_init(&env[v]);
         }
 
-        st = set.density | set.drift << 2u | set.drone_on << 4u | set.color << 5u | chord_templ << 10u |
-             set.scale << 13u;
+        st = settings_state_word(&set, eng.chord_templ);
         if (st != state_drawn) {                 /* a real settings/chord change: redraw both right away */
             state_drawn = st;
             draw_pond();
@@ -462,9 +385,10 @@ static void app_main(void)
             next_draw_ms = fm1_ms + POND_TICK_MS;
         }
 
-        /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md), but this is an
-           ambient instrument that may rarely go fully silent -- don't wait forever for one */
-        if (dirty && (quiet() || fm1_ms - t_change > 30000u) && fm1_ms - t_change > 2000u) {
+        /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md). While paused the sound
+           has faded out, so save then; otherwise wait for 30 s without a change, since this is an ambient instrument
+           that may rarely go fully silent -- don't wait forever for one. Never sooner than 2 s after the last change. */
+        if (dirty && fm1_ms - t_change > 2000u && (paused || fm1_ms - t_change > 30000u)) {
             settings_save(&set, sizeof set);
             dirty = 0;
         }

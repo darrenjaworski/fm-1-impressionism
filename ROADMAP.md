@@ -9,7 +9,7 @@ v1 was scoped in a `/grill-me` session; one default below was made by the agent 
 rather than an explicit answer, and is flagged as such.
 
 **Status**: the audio engine below (drone + 3 chord voices, both timers, panel mapping, persistence) is
-implemented, TDD'd (`tests/planing_test.c`), flashed to a real connected FM-1 via CI-built `.fwsc` packages, and
+implemented, TDD'd (`tests/planing_test.c`, `tests/engine_test.c`), flashed to a real connected FM-1 via CI-built `.fwsc` packages, and
 **confirmed working by ear on the real hardware**. The pond screen is built (Monet palette and direction, see below);
 its slow ripple and lily-pad drift are decoupled from the panel, and their feel on the FM-1 display is still being tuned by eye. The
 Pages emulator is live and working. The worst audio ISR block is **1.3 ms of the 2.9 ms budget** (measured on the FM-1,
@@ -44,15 +44,15 @@ already provided by `platform.c`) and restored on boot — the instrument comes 
 
 ### Panel mapping (v1)
 
-| Control         | Does                                                    |
-| --------------- | ------------------------------------------------------- |
-| `ENC_SELECT`    | scale: cycles through 6 (see Chord and scale expansion) |
-| `ENC_ALGORITHM` | density (how often voices retrigger)                    |
-| `ENC_KNOB1`     | drift rate                                              |
-| `ENC_KNOB2`     | filter "color" (cutoff)                                 |
-| `BTN_ARP`       | drone on/off                                            |
-| `BTN_PLAY`      | pause/resume (freeze timers, fade out)                  |
-| `MASTER`        | volume (unchanged from the stock demo)                  |
+| Control         | Does                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| `ENC_SELECT`    | scale: cycles through 6 (see Chord and scale expansion)                                           |
+| `ENC_ALGORITHM` | density: how often the chord moves, how soon each colour voice re-enters, how long its notes hold |
+| `ENC_KNOB1`     | drift rate                                                                                        |
+| `ENC_KNOB2`     | filter "color" (cutoff)                                                                           |
+| `BTN_ARP`       | drone on/off                                                                                      |
+| `BTN_PLAY`      | pause/resume (fade out, freeze timers, no events while paused)                                    |
+| `MASTER`        | volume (unchanged from the stock demo)                                                            |
 
 ### Screen: a living Monet pond
 
@@ -124,7 +124,37 @@ Visual polish matching the soft-focus ambient aesthetic. Commit: `1184ac4`.
 
 **`BTN_PLAY` pause/resume** ✅ — Pressing BTN_PLAY toggles a pause state that freezes every timer (re-plan, re-root,
 and each colour voice's note timer) and fades all voices to silence over about 45 ms (the reverb tail rings out after that). Resume restarts the
-timers where they stopped. BTN_PLAY LED shows state: lit=generating, off=paused.
+timers where they stopped; a voice with no wait left gets a fresh random one, so the voices do not all enter together (2026-10-31). BTN_PLAY LED shows state: lit=generating, off=paused.
+
+## Engine and settings layers (2026-10-31)
+
+The engine's rules moved out of `impressionism.c` into two pure headers, tested on the host:
+
+- `firmware/src/engine.h`: the drone's root, the chord and its template, the timers, the colour voices' held flags and the
+  pause bookkeeping. Its functions return events (note on, note off, drone note) that `impressionism.c` applies to the sound.
+  Time is passed in, and every comparison is wrap-safe. Tested in `tests/engine_test.c`.
+- `firmware/src/settings.h`: the five saved bytes (the same layout as before, so saved settings still load), their defaults,
+  the range check, the clamped knobs and the screen's state word.
+
+Density now sets three things: how often the chord moves (`DENSITY_TABLE`, `planing.h`), how soon each colour voice
+re-enters, and how long its note holds (`HOLD_TABLE`, `engine.h`: D0 2.5-7 s, D1 2.5-6 s, D2 2-5 s, D3 1.2-3 s). Before this, holds were 2.5-7 s at every density.
+
+Measured note rate by density (`tests/engine_test.c`, host only, 2026-10-31): 4 seeds x 6 scales x 4 drifts x 3 simulated
+hours per density, with a simple envelope model (a voice is quiet 6 s after its note off):
+
+| Density | Notes per minute |
+| ------- | ---------------- |
+| D0      | 9.55             |
+| D1      | 14.01            |
+| D2      | 18.61            |
+| D3      | 22.14            |
+
+The D2 to D3 step is the smallest (19%, against 33-47% for the others). With the 6 s release gate, most of a D3 voice's cycle
+is that gate, not its hold, so the hold table alone makes that step small. The by-ear check of the new holds is still to do.
+
+Pause and resume: no event is sent while paused. A note that was held when the pause began is cut (its envelope is cleared),
+and its flag is cleared with it. A scale change during a pause changes the drone's note, which is sent on resume. Settings
+are saved 2 s after the last change while paused, or 30 s after it while playing.
 
 ## Dreamier sound: measured against the reference (2026-10-31)
 
@@ -184,7 +214,7 @@ unused hardware, as is the entire 27-key keybed. Proposed assignment for the res
 2026-10-31 session:
 
 - **`ENC_SELECT` (cycle, not toggle)**: done (see Chord and scale expansion above). No new control, no new concept.
-- **`ENC_ALGORITHM`**: unchanged — stays density (how often voices retrigger).
+- **`ENC_ALGORITHM`**: unchanged — stays density (how often the chord moves, voices re-enter, and notes hold).
 - **`ENC_KNOB3` — voice-leading / chord-motion amount**: weights how `pick_chord()` (`planing.h`) picks the
   next chord template. At 0, pure random walk (today's behaviour); at 3, bias toward whichever remaining
   template shares the most absolute pitches with the outgoing chord. Mechanically: compute each candidate's
