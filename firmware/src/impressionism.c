@@ -61,7 +61,11 @@ static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u }; 
 static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
 static env_t env[NV];                          /* colour voices 1..3: each note attacks, holds, releases (envelope.h) */
 static uint32_t note_off_ms[NV];               /* when each colour note's gate closes */
+#define HARM_FUND 22938                         /* the main partial's mix, Q15: fundamental 0.70, 2nd 0.20, 3rd 0.10 (sums to 1) */
+#define HARM_2 6554
+#define HARM_3 3277
 #define GATE_FULL 8000                          /* 4 voices at this level sum to 32000, under full scale */
+#define DRONE_FULL 4000                         /* the pedal sits ~6 dB under the colour voices, else it swamps the spectrum */
 
 /* attack/release glide once per audio block (docs/RULES.md: envelopes need not run every sample), ~5.8 ms a
    block at 256 frames/44.1 kHz -- sized for a few seconds each (soft-focus, CLAUDE.md's Mission), tune by ear
@@ -118,7 +122,8 @@ static void app_audio(int32_t *out, uint32_t n)
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
         for (i = 0; i < n; i++) {
-            int32_t s_main = (sine(ph) * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
+            int32_t h = (sine(ph) * HARM_FUND + sine(ph << 1) * HARM_2 + sine(ph + (ph << 1)) * HARM_3) >> 15;
+            int32_t s_main = (h * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
             ph += step;
             ph_d += step_d;
             out[2u * i] += (3 * s_main + s_det) >> 2;         /* L leans on the main partial... */
@@ -418,7 +423,7 @@ static void app_main(void)
         }
 
         /* voice gates: drone controlled by setting, colour voices managed by triggers */
-        voice[0].gate = (set.drone_on && !paused) ? GATE_FULL : 0;
+        voice[0].gate = (set.drone_on && !paused) ? DRONE_FULL : 0;
 
         /* mute during pause: instant silence over ~30ms */
         if (paused) {
