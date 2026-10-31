@@ -259,6 +259,18 @@ static void init_pond(void)
             if (cell_kind(x, y) == CELL_PAD) pond_total_pads++;
 }
 
+static int32_t pad_jitter_x(uint32_t x, uint32_t y)  /* brownian movement for lily pads: small, mellow drift */
+{
+    uint32_t h = cell_hash(x * 2u + y * 3u + ripple_phase / 32u);
+    return (int32_t)((h % 5u) - 2);  /* -2..+2 pixel drift per pad */
+}
+
+static int32_t pad_jitter_y(uint32_t x, uint32_t y)
+{
+    uint32_t h = cell_hash(x * 3u + y * 5u + ripple_phase / 32u + 1u);
+    return (int32_t)((h % 5u) - 2);
+}
+
 static void draw_pond(void)
 {
     uint32_t x, y, pad_i = 0, active_n = active_cell_count(set.density, pond_total_pads);
@@ -275,7 +287,9 @@ static void draw_pond(void)
             } else {
                 c = shimmer_rgb(water, shimmer);
             }
-            cv_rect((int32_t)(x * 10u), (int32_t)(y * 10u), 10, 10,
+            int32_t px = (int32_t)(x * 10u) + pad_jitter_x(x, y);
+            int32_t py = (int32_t)(y * 10u) + pad_jitter_y(x, y);
+            cv_rect(px, py, 10, 10,
                     RGB((uint32_t)c.r * dim / 100u, (uint32_t)c.g * dim / 100u, (uint32_t)c.b * dim / 100u));
         }
     cv_blit(0, POND_Y);
