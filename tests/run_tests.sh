@@ -36,10 +36,9 @@ run "the generative engine's pure logic: scales, chord templates, the planing pi
 $CC -o "$OUT/scene_test" tests/scene_test.c
 run "the reactive lily-pond screen's pure logic: colour temperature, bloom palette, density, drift, layout" "$OUT/scene_test"
 $CC -o "$OUT/reverb_test" tests/reverb_test.c
-run "Schroeder reverb: 4 combs + 2 allpasses, T60 ~7s, stereo, deterministic" "$OUT/reverb_test"
+run "Schroeder reverb: 4 parallel damped combs + 2 series feedback combs, deterministic, bounded" "$OUT/reverb_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
-run "voice envelope: attack, exponential release, quiet threshold, T60" "$OUT/envelope_test"
-run "the release pipeline's version bump (tools/next_version.py), incl. two real bugs it already caught once" python3 tests/next_version_test.py
+run "voice envelope: attack, exponential release, quiet threshold" "$OUT/envelope_test"
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc

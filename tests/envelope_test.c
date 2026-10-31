@@ -42,11 +42,11 @@ int main(void)
     env_tick(&e, ENV_ATTACK_STEP);
     assert(e.level == ENV_ATTACK_STEP);
 
-    /* amp scale: full envelope is the GATE_FULL peak (8000 ~ 8160) */
+    /* amp scale: full envelope (ENV_FULL = 32640) maps to ~8160 (Q15) */
     env_init(&e);
     env_gate_on(&e);
     for (i = 0; i < 510; i++) env_tick(&e, ENV_ATTACK_STEP);
-    assert(env_to_amp(&e) == (int32_t)(ENV_FULL >> 2));
+    assert(env_to_amp(&e) == 8160);
 
     return 0;
 }
