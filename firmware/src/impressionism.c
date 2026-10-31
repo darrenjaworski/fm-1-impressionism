@@ -335,15 +335,17 @@ static void draw_status(void)                   /* only on a real settings/chord
     s[i++] = 'D'; s[i++] = (char)('0' + set.density);   /* ENC_ALGORITHM */
     s[i] = 0;
     draw_text_box(0, POND_Y + POND_H * 10u + 6u, 240, &FONT_S, s, C_WHITE, 1);
-    /* the knob row, in the knobs' order left to right: ENC_KNOB1 drift, then ENC_KNOB2 colour */
+    /* the knob rows, in the knobs' order, top to bottom and left to right: ENC_KNOB1 drift, ENC_KNOB2 colour,
+       then ENC_KNOB3 and ENC_KNOB4, which are not built yet and show "--" */
     k[j++] = 'D'; k[j++] = 'R'; k[j++] = 'I'; k[j++] = 'F'; k[j++] = 'T'; k[j++] = ' ';
     k[j++] = (char)('0' + set.drift);
-    k[j++] = ' '; k[j++] = ' '; k[j++] = ' ';
+    k[j++] = ' '; k[j++] = ' ';
     k[j++] = 'C'; k[j++] = 'O'; k[j++] = 'L'; k[j++] = 'O'; k[j++] = 'U'; k[j++] = 'R'; k[j++] = ' ';
     if (set.color >= 10u) k[j++] = (char)('0' + set.color / 10u);
     k[j++] = (char)('0' + set.color % 10u);
     k[j] = 0;
-    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, k, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * 10u + 26u, 240, &FONT_S, k, C_OFF, 1);
+    draw_text_box(0, POND_Y + POND_H * 10u + 46u, 240, &FONT_S, "VOICE --  SLEEP --", C_OFF, 1);
 }
 
 #if ISR_TIMING && !defined(DINGHY_HOST)
