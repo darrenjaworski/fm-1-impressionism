@@ -7,8 +7,10 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 ## Where it stands
 
 - **Working on real hardware:** the audio engine is flashed to an FM-1 from CI-built `.fwsc` packages and confirmed by ear.
-- **Heard on the FM-1:** the soft-focus LFO and the rebalanced spectrum, on build `f28612a`. The verdict was "sounding
-  fine", so there's no detail on depth, drone level or brightness.
+- **Heard on the FM-1:** the soft-focus LFO and the rebalanced spectrum, on build `f28612a` ("sounding fine"), and
+  voice leading, on build `34d52d0` ("sounding good"). Neither verdict has detail on depth, drone level, brightness or
+  how the leads compare. Not confirmed on the device: the `VOICE` row following the knob, and the setting surviving a
+  power-cycle.
 - **Not yet heard or seen on hardware:** each of the six scales and eight chords, the new note holds and the pond screen.
   The colour-note envelope, stereo and reverb tail have only been heard in the emulator, and the drone level only in the
   emulator and in the build before the rebalance.
@@ -24,16 +26,16 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 The order follows dependencies first, then impact. Sound comes before moods because the moods are tuned by ear against
 it. Anything that adds a saved setting comes before moods because moods store those settings.
 
-| #   | Item                                                                    | Impact | Size   | Audio ISR | Why it's here                                                          |
-| --- | ----------------------------------------------------------------------- | ------ | ------ | --------- | ---------------------------------------------------------------------- |
-| 1   | [Re-baseline](#1-re-baseline)                                           | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
-| 2   | [Soft-focus LFO](#2-soft-focus-lfo) (done)                              | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
-| 3   | [Spectral balancing](#3-spectral-balancing) (done)                      | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
-| 4   | [Voice leading and settings](#4-voice-leading-and-settings) (host done) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
-| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)                           | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
-| 6   | [Sleep timer](#6-sleep-timer)                                           | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
-| 7   | [Key sets the drone root](#7-key-sets-the-drone-root)                   | Medium | Small  | No        | First use of the keybed; completes the panel                           |
-| 8   | [Hub submission](#8-hub-submission)                                     | High   | Medium | No        | Reaches listeners; the controls and sound should be final first        |
+| #   | Item                                                               | Impact | Size   | Audio ISR | Why it's here                                                          |
+| --- | ------------------------------------------------------------------ | ------ | ------ | --------- | ---------------------------------------------------------------------- |
+| 1   | [Re-baseline](#1-re-baseline)                                      | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
+| 2   | [Soft-focus LFO](#2-soft-focus-lfo) (done)                         | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
+| 3   | [Spectral balancing](#3-spectral-balancing) (done)                 | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
+| 4   | [Voice leading and settings](#4-voice-leading-and-settings) (done) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
+| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)                      | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
+| 6   | [Sleep timer](#6-sleep-timer)                                      | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
+| 7   | [Key sets the drone root](#7-key-sets-the-drone-root)              | Medium | Small  | No        | First use of the keybed; completes the panel                           |
+| 8   | [Hub submission](#8-hub-submission)                                | High   | Medium | No        | Reaches listeners; the controls and sound should be final first        |
 
 After the Hub, in rough priority:
 
@@ -106,7 +108,7 @@ pure fundamental at full level.
 
 ### 4. Voice leading and settings
 
-Done and tested on the host; not heard on the FM-1.
+Done: tested on the host, and heard on the FM-1 in build `34d52d0` ("sounding good").
 
 **`ENC_KNOB3`, voice leading, 0-3:** each chord move (a re-plane or a re-root) picks among the templates that fit the new
 degree, weighted towards the ones that keep notes of the chord it's leaving (`pick_chord_led()`, `planing.h`). A template
