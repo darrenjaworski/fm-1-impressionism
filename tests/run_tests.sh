@@ -62,6 +62,8 @@ $CC -o "$OUT/envelope_test" tests/envelope_test.c
 run "voice envelope: attack, exponential release, quiet threshold" "$OUT/envelope_test"
 $CC -o "$OUT/engine_test" tests/engine_test.c
 run "the generative engine on a fake clock (3 h, 4 seeds, all scales/densities/drifts): notes in scale and register, pause, resume, wrap, note rate by density; and the saved settings" "$OUT/engine_test"
+$CC -o "$OUT/melody_test" tests/melody_test.c
+run "the melody on a fake clock at 1 ms (4 seeds x 6 scales x 4 densities x 1 h): notes in scale and 60..86, phrase ends, echoes, rests, rhythm, interrupt, wrap" "$OUT/melody_test"
 
 $CC -o "$OUT/ota_test" tests/ota_test.c
 run "M-UPGRADE entry (FM-1)" "$OUT/ota_test" build/impressionism.fwsc

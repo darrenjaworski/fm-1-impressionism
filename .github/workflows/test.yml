@@ -51,3 +51,12 @@ jobs:
 
       - name: Run the full test suite (tests/run_tests.sh)
         run: sh tests/run_tests.sh
+
+      # Experiment branches have no release, so keep the tested FM-1 package here to flash by hand. After the tests: a
+      # build that fails them is never uploaded.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: impressionism-fm1-fwsc
+          path: build/impressionism.fwsc
+          if-no-files-found: error
+          retention-days: 14

@@ -8,8 +8,10 @@
  * nothing listens to them. Four voices, fixed roles:
  *
  *   voice 0   the drone: a sustained root/pedal tone. Re-roots itself on its own slow, independent timer.
- *   voice 1-3 the chord's three colour tones above that root, from one of 8 templates (ROADMAP.md),
+ *   voice 1-2 the chord's two lower colour tones above that root, from one of 8 templates (ROADMAP.md),
  *             each triggered individually when quiet, holding for a density-dependent time (engine.h), then releasing
+ *   voice 3   the melody (melody.h): a short theme on the chord's top tone, which comes back changed, with long silences.
+ *             Its notes come from its own timer, not from the quiet rule, and it attacks faster (about 80 ms)
  *
  * This file is the sound, the input and the screen. The decisions (which notes, when) are in engine.h, which returns
  * events that apply_events() turns into voice settings here.
@@ -62,7 +64,8 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #endif
 
 /* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
-#define NV 4u                                   /* 0 = drone, 1..3 = the chord's colour tones */
+#define NV 4u                                   /* 0 = drone, 1..2 = the chord's colour tones, 3 = the melody (MELODY_VOICE) */
+#define MELODY_VOICE (ENGINE_MELODY_VOICE + 1u) /* voice[] index of the melody: engine voice 2 (engine.h) */
 static struct {
     volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 */
     volatile int32_t gate;                      /* target level, Q15-ish: 0 = released */
@@ -96,6 +99,10 @@ static env_t env[NV - 1u];                     /* colour voices: env[v] is voice
    Applied only to the drone; colour voices are shaped by envelope.h's attack/release. */
 #define ATTACK_STEP 8                           /* glide step when envelope level rises */
 #define RELEASE_STEP 5                          /* glide step when envelope level falls */
+#define MELODY_ATTACK_STEP 2368u                /* Q8 per block: 32640 / 2368 = 13.8 blocks, about 80 ms to full (a block is 5.8 ms).
+                                                   The melody's notes are short, so they attack faster than the colour voices' ENV_ATTACK_STEP */
+static volatile int32_t mel_level = 200;        /* the melody's level for the note now sounding (melody.h's 200 or 120, 0..255); set
+                                                   by apply_events, read by the ISR. One writer: the main loop */
 
 #ifdef DINGHY_HOST
 static reverb_t reverb;                         /* host build: plain memory (the .pool section is ELF-only) */
@@ -122,6 +129,7 @@ static void app_audio(int32_t *out, uint32_t n)
         int32_t drift;
         voice[v].lfo_ph += lfo_inc[v];
         drift = pitch_drift(voice[v].inc, sine(voice[v].lfo_ph));
+        if (v == MELODY_VOICE) drift >>= 2;     /* a quarter of the drift (about 3.4 cents, not 13.5): the line stays in tune with the chord */
         step = voice[v].inc + (uint32_t)drift;
         ph_d = voice[v].ph_detune;
         step_d = step + (step >> 8);  /* +1/256 = ~7 cents: a slow chorus shimmer, not a near-semitone clash */
@@ -132,12 +140,14 @@ static void app_audio(int32_t *out, uint32_t n)
             if (amp < g) { amp += ATTACK_STEP; if (amp > g) amp = g; }
             else if (amp > g) { amp -= RELEASE_STEP; if (amp < g) amp = g; }
         } else {
-            env_tick(&env[v - 1u], ENV_ATTACK_STEP);
+            env_tick(&env[v - 1u], v == MELODY_VOICE ? MELODY_ATTACK_STEP : ENV_ATTACK_STEP);
             amp = env_to_amp(&env[v - 1u]);
         }
         voice[v].amp = amp;
+        if (v == MELODY_VOICE) amp = (amp * mel_level) >> 8;   /* the note's level, 200/256 or 120/256 (melody.h) */
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
-        amp = (amp * amp_swell(sine(voice[v].lfo_ph + LFO_QUARTER), LFO_AMP_DEPTH)) >> 15;  /* soft focus: this block's level only, voice[v].amp keeps the glide */
+        if (v != MELODY_VOICE)                  /* soft focus: this block's level only, voice[v].amp keeps the glide. Not on the melody: a note must not sink at random */
+            amp = (amp * amp_swell(sine(voice[v].lfo_ph + LFO_QUARTER), LFO_AMP_DEPTH)) >> 15;
         bright = amp << 2;                      /* upper partials follow the note's level: bright at the start, warmer as it decays */
         if (bright > 32767) bright = 32767;
         for (i = 0; i < n; i++) {
@@ -191,8 +201,9 @@ static void apply_events(uint32_t n)
         if (events[i].kind == EV_DRONE) {
             voice[0].inc = note_to_inc(events[i].note);
         } else if (events[i].kind == EV_NOTE_ON) {
-            voice[v + 1u].inc = note_to_inc(events[i].note);
+            voice[v + 1u].inc = note_to_inc(events[i].note);   /* no phase reset: a melody note slurs from the last one, no click */
             env_gate_on(&env[v]);
+            if (v == ENGINE_MELODY_VOICE) mel_level = events[i].level;
         } else {
             env_gate_off(&env[v]);
         }

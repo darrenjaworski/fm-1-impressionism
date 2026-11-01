@@ -59,6 +59,7 @@ typedef struct {
     uint32_t notes, drones, bad_scale, bad_register, bad_drone, bad_quiet, double_on, orphan_off;
     uint32_t paused_events, held_at_pause, max_ons, triple_ticks, too_many, log_full;
     uint32_t moves, shared_sum;                 /* chord moves (a re-plane or re-root), and the notes each kept from the chord before */
+    uint32_t top_on;                            /* chord voices (0, 1) that sounded the chord's top tone */
 } stats_t;
 
 typedef struct {
@@ -72,7 +73,15 @@ typedef struct {
     stats_t st;
     rec_t log[LOG_MAX];
     uint32_t log_n, start, scale, log_on;
+    uint32_t top_pc;                            /* the pitch class of the chord's top tone now (CHORD_ST[templ][2] above the root) */
 } sim_t;
+
+/* the chord's top tone's pitch class now, from the engine's root and template */
+static void sim_set_top(sim_t *s, uint32_t scale)
+{
+    int32_t top_st = scale_degree_to_semitone(scale, s->e.home_degree + s->e.plane_degree) + CHORD_ST[s->e.chord_templ][2];
+    s->top_pc = (uint32_t)(((top_st % 12) + 12) % 12);
+}
 
 /* a voice is quiet when it is not sounding and its release has run out (wrap-safe) */
 static uint32_t model_quiet(const env_model_t *m, uint32_t now)
@@ -108,8 +117,13 @@ static void sim_apply(sim_t *s, const engine_event_t *ev, uint32_t n, uint32_t n
             if (!in_scale(s->scale, note)) s->st.bad_scale++;
         } else if (ev[i].kind == EV_NOTE_ON) {
             if (v >= ENGINE_VOICES || s->env.sounding[v]) s->st.double_on++;
-            if (v < ENGINE_VOICES && !((quiet >> v) & 1u)) s->st.bad_quiet++;
-            if (note < 36u || note > 82u) s->st.bad_register++;
+            if (v < ENGINE_CHORD_VOICES && !((quiet >> v) & 1u)) s->st.bad_quiet++;   /* the melody is not held to quiet */
+            if (v < ENGINE_CHORD_VOICES) {
+                if (note < 36u || note > 82u) s->st.bad_register++;                    /* the chord's two lower tones */
+                if (note % 12u == s->top_pc) s->st.top_on++;                           /* ...never the chord's top tone */
+            } else if (note < 60u || note > 86u) {
+                s->st.bad_register++;                                                  /* the melody: 60..86 (melody.h) */
+            }
             if (!in_scale(s->scale, note)) s->st.bad_scale++;
             if (v < ENGINE_VOICES) s->env.sounding[v] = 1u;
             s->st.notes++;
@@ -154,6 +168,7 @@ static void sim_run(sim_t *s, const run_t *c)
     s->log_on = c->log_on;
     for (v = 0; v < ENGINE_VOICES; v++) s->env.quiet_at[v] = c->start;
     n = engine_init(&s->e, c->seed, &set, c->start, ev);
+    sim_set_top(s, c->scale);
     sim_apply(s, ev, n, c->start, 0u);
     for (k = 1; k <= c->ticks; k++) {
         now = c->start + k * TICK_MS;
@@ -162,6 +177,7 @@ static void sim_run(sim_t *s, const run_t *c)
         if (c->pause_k && k == c->pause_k) {
             for (v = 0; v < ENGINE_VOICES; v++) {
                 if (s->env.sounding[v]) s->st.held_at_pause++;
+                if (v == ENGINE_MELODY_VOICE) continue;   /* the melody's note is still held: its OFF is sent at the first tick after resume */
                 s->env.sounding[v] = 0u;
                 s->env.quiet_at[v] = now;
             }
@@ -178,6 +194,7 @@ static void sim_run(sim_t *s, const run_t *c)
             s->st.shared_sum += lit_shared(root_st_before, t_before, scale_degree_to_semitone(c->scale, s->e.home_degree + s->e.plane_degree), s->e.chord_templ);
         }
         if (in_pause) s->st.paused_events += n;
+        sim_set_top(s, c->scale);
         sim_apply(s, ev, n, now, quiet);
     }
 }
@@ -288,9 +305,10 @@ int main(void)
     uint32_t si, sc, dr, de, runs = 0u, d, minutes_per_density;
     uint64_t notes_by_density[4] = { 0u, 0u, 0u, 0u };
     uint32_t bad_scale = 0, bad_register = 0, bad_drone = 0, bad_quiet = 0, double_on = 0, orphan_off = 0;
-    uint32_t drones = 0, max_ons = 0, too_many = 0;
+    uint32_t drones = 0, max_ons = 0, too_many = 0, top_on = 0;
 
     settings_tests();
+    check(ROOT_BASE_NOTE == MELODY_ROOT_NOTE, "melody: melody.h's root note is engine.h's ROOT_BASE_NOTE (the same MIDI register)");
 
     /* the matrix: every seed x scale x drift x density, 3 simulated hours each */
     for (si = 0; si < 4u; si++)
@@ -311,14 +329,16 @@ int main(void)
                     orphan_off += s.st.orphan_off;
                     drones += s.st.drones;
                     too_many += s.st.too_many;
+                    top_on += s.st.top_on;
                     if (s.st.max_ons > max_ons) max_ons = s.st.max_ons;
                 }
     check(bad_scale == 0u, "every note-on and drone note is in its scale (4 seeds x 6 scales x 4 drifts x 4 densities)");
     check(bad_drone == 0u && drones > 0u, "the drone note is within 24..48 at every re-root");
-    check(bad_register == 0u, "every colour note is in register, 36..82 (the top voice is at most 82)");
-    check(bad_quiet == 0u, "a colour note starts only when its voice is quiet");
+    check(bad_register == 0u, "chord voices 0 and 1 are in 36..82; the melody (voice 2) is in 60..86");
+    check(top_on == 0u, "chord voices 0 and 1 never sound the chord's top tone (by the template's third tone, pitch class)");
+    check(bad_quiet == 0u, "a chord voice starts a note only when quiet (the melody is not held to quiet)");
     check(double_on == 0u && orphan_off == 0u, "every note-off follows its voice's note-on; no voice starts while it sounds");
-    check(max_ons <= ENGINE_VOICES && too_many == 0u, "a call starts at most one note per colour voice, and fits its event array");
+    check(max_ons <= ENGINE_VOICES && too_many == 0u, "a call starts at most one note per voice (3 colour voices), and fits its event array");
 
     /* voice leading: the same matrix at every lead (ENC_KNOB3). The rules above must hold at each, and the notes a chord
        move keeps from the chord before (counted with the literal templates above) must rise at every step */
@@ -401,14 +421,28 @@ int main(void)
         c.pause_k = 10u; c.resume_k = 210u;
         c.ticks = 6000u + 200u;                  /* the pause is 200 ticks: B must run that much longer to cover A's end */
         sim_run(&bb, &c);
-        if (a.log_n != bb.log_n) mismatch = 1;
-        for (i = 0; !mismatch && i < a.log_n; i++) {
-            uint32_t t = a.log[i].t >= 500u ? a.log[i].t + 10000u : a.log[i].t;
-            if (bb.log[i].t != t || bb.log[i].kind != a.log[i].kind || bb.log[i].voice != a.log[i].voice ||
-                bb.log[i].note != a.log[i].note) mismatch = 1;
+        /* the chord voices and the drone are compared: the melody is interrupted by a resume (melody_interrupt), so its
+           timeline is not the unpaused run's 10 s later, and it has its own test below */
+        {
+            uint32_t ia = 0u, ib = 0u, na = 0u, nb = 0u;
+            for (i = 0; i < a.log_n; i++) na += a.log[i].voice != ENGINE_MELODY_VOICE;
+            for (i = 0; i < bb.log_n; i++) nb += bb.log[i].voice != ENGINE_MELODY_VOICE;
+            if (na != nb) mismatch = 1;
+            for (;;) {
+                uint32_t t;
+                while (ia < a.log_n && a.log[ia].voice == ENGINE_MELODY_VOICE) ia++;
+                while (ib < bb.log_n && bb.log[ib].voice == ENGINE_MELODY_VOICE) ib++;
+                if (ia == a.log_n || ib == bb.log_n) break;
+                t = a.log[ia].t >= 500u ? a.log[ia].t + 10000u : a.log[ia].t;
+                if (bb.log[ib].t != t || bb.log[ib].kind != a.log[ia].kind || bb.log[ib].voice != a.log[ia].voice ||
+                    bb.log[ib].note != a.log[ia].note) mismatch = 1;
+                if (mismatch) break;
+                ia++;
+                ib++;
+            }
         }
         check(!mismatch && a.log_n > 0u && bb.st.paused_events == 0u,
-              "resume: each timer restarts with the time it had left (paused run = unpaused run, 10 s later)");
+              "resume: each chord timer restarts with the time it had left (paused run = unpaused run, 10 s later)");
     }
 
     /* a scale change while paused sends nothing; the drone note waits for resume, in its register and in the new scale */
@@ -453,6 +487,41 @@ int main(void)
                 if (first != 0xFFFFFFFFu && first - resume_t < 1200u) ok = 0;
             }
         check(ok, "resume after every voice was due: no tick starts all three notes, none on the resume tick, first wait >= 1.2 s");
+    }
+
+    /* the melody across a pause: a resume starts no melody note for 3 s, and a note sounding at the pause is released at the
+       first tick after the resume (the resume tick itself sends nothing). Pauses at 16 points, over 4 seeds, so some pauses
+       land in a melody note and some in a rest. */
+    {
+        uint32_t i, p, cases = 0u, sounding_cases = 0u, ok = 1u;
+        for (i = 0; i < 4u; i++)
+            for (p = 0; p < 16u; p++) {
+                run_t c;
+                uint32_t pause_k = 1000u + p * 53u, resume_k = pause_k + 20u, j, last_before = 0xFFFFFFFFu, first_after = 0xFFFFFFFFu;
+                uint32_t first_kind = 0u;
+                c.seed = SEEDS[i]; c.scale = 1u; c.density = 0u; c.drift = 0u; c.start = 0u; c.ticks = resume_k + 2000u;
+                c.pause_k = pause_k; c.resume_k = resume_k; c.mute_k = 0u; c.log_on = 1u; c.lead = 0u;
+                sim_run(&s, &c);
+                cases++;
+                for (j = 0; j < s.log_n; j++) {
+                    uint32_t t = s.log[j].t;
+                    if (s.log[j].voice != ENGINE_MELODY_VOICE || s.log[j].kind == EV_DRONE) continue;
+                    if (t < pause_k * TICK_MS) last_before = s.log[j].kind;
+                    else if (t >= resume_k * TICK_MS && first_after == 0xFFFFFFFFu) {
+                        first_after = t;
+                        first_kind = s.log[j].kind;
+                    }
+                }
+                if (last_before == EV_NOTE_ON) {       /* sounding at the pause: its OFF is the first melody event after the resume */
+                    sounding_cases++;
+                    if (first_after != (resume_k + 1u) * TICK_MS || first_kind != EV_NOTE_OFF) ok = 0u;
+                } else if (first_after != 0xFFFFFFFFu && (first_kind == EV_NOTE_OFF || first_after < resume_k * TICK_MS + 3000u)) {
+                    ok = 0u;                    /* silent at the pause: no OFF, and no note within 3 s of the resume */
+                }
+                if (s.st.paused_events) ok = 0u;
+            }
+        check(ok && cases == 64u && sounding_cases > 0u,
+              "melody across a pause: a note sounding at the pause is released at the first tick after resume; no melody note starts within 3 s");
     }
 
     /* wrap: fm1_ms passes 0xFFFFFFFF during the run. With the same pause, the run must match the run without the wrap. */
