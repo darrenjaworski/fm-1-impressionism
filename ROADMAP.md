@@ -7,13 +7,15 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 ## Where it stands
 
 - **Working on real hardware:** the audio engine is flashed to an FM-1 from CI-built `.fwsc` packages and confirmed by ear.
-- **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, the soft-focus LFO and the
-  pond screen.
+- **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, the soft-focus LFO, the
+  rebalanced spectrum and the pond screen.
   The colour-note envelope, harmonics, stereo, drone level and reverb tail have only been heard in the emulator.
-- **Biggest gap in the sound:** the spectral centroid (169 Hz) and envelope range (14.1 dB) are short of the reference
-  ([Measurements](#measurements)).
+- **Biggest gap in the sound:** none on the host numbers, which are at or near every target
+  ([Measurements](#measurements)). Whether it sounds right is unheard: the rebalanced spectrum is about 4.5 dB quieter
+  overall and brighter, and the drone is much further back.
 - **Biggest gap in the panel:** `ENC_KNOB3`, `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
-- **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, so there's room for what's planned.
+- **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, before the soft-focus LFO and one more
+  `sine()` per sample per voice. It needs re-measuring on the FM-1.
 
 ## Up next, in order
 
@@ -24,7 +26,7 @@ it. Anything that adds a saved setting comes before moods because moods store th
 | --- | ----------------------------------------------------------- | ------ | ------ | --------- | ---------------------------------------------------------------------- |
 | 1   | [Re-baseline](#1-re-baseline)                               | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
 | 2   | [Soft-focus LFO](#2-soft-focus-lfo) (host done, unheard)    | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
-| 3   | [Spectral balancing](#3-spectral-balancing)                 | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
+| 3   | [Spectral balancing](#3-spectral-balancing) (host done)     | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
 | 4   | [Voice leading and settings](#4-voice-leading-and-settings) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
 | 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)               | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
 | 6   | [Sleep timer](#6-sleep-timer)                               | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
@@ -74,8 +76,29 @@ The mission's slow drift as something the instrument does on its own. Done and t
 
 ### 3. Spectral balancing
 
-Adjust harmonic levels and envelope shape towards the targets, mainly envelope range (15+ dB) and centroid (350-500 Hz).
-The ear is the final judge. Re-measure the ISR after any per-sample change.
+Done and tested on the host; not heard on the FM-1, and the ISR isn't re-timed. The ear is the final judge.
+
+Where the problem was: with the drone off, the 20-100 Hz band falls from -3.5 dB to -66 dB, so the drone held nearly all
+the low-end power. And a centroid of about 250 Hz held whatever the main partial did, because the detuned partial was a
+pure fundamental at full level.
+
+- **Drone level:** `DRONE_FULL` 4000 to 1500, about 15 dB under a full colour note, down from 6 dB. Level and band at
+  each setting (otherwise as before): 4000 gives -3.5 dB, 2000 -7.7, 1000 -13.1, 500 -19.0. The envelope range rose with
+  it, because the drone had been filling the gaps between notes.
+- **Main partial:** fundamental 0.40, 2nd 0.35, 3rd 0.25 (was 0.70, 0.20, 0.10).
+- **Upper partials:** 4th-6th at four times their old level (`HARM_4` to `HARM_6`).
+- **Detuned partial:** 0.40 fundamental and 0.60 second harmonic (`DET_FUND`, `DET_2`), where it was a pure fundamental.
+  With the other changes in, a pure fundamental gave a centroid of 280 Hz, 0.6/0.4 gave 354 Hz, 0.4/0.6 gave 407 Hz and
+  all second harmonic gave 453 Hz. 0.4/0.6 keeps some of the chorus on the fundamental.
+- **Cost:** one more `sine()` per sample per active voice.
+- **Headroom:** peak -9.8 dBFS with no clipped samples, including the worst case (`tests/scripts/worstcase.txt`:
+  density 3, drift 3, colour fully open, all six scales).
+- **Quieter:** the overall RMS fell 4.5 dB, from -24.9 to -29.4 dBFS, so MASTER needs turning up. There's room to add
+  gain, since the peak has about 10 dB of headroom.
+- **Brighter when open:** at colour 31 the 1.6-3.2 kHz band is -17.6 dB in the worst-case render, above the target range.
+  At the default colour 12 it's -30 dB.
+- **Not tuned by ear:** the targets are approximate (see [Measurements](#measurements)) and every number above is a
+  starting guess. The drone's level in particular is a judgement: at 1200 the band is -16.0 dB, inside the target.
 
 ### 4. Voice leading and settings
 
@@ -156,11 +179,12 @@ The full rules are in agents.md's [Distribution](agents.md#distribution-fm-1-fir
 
 ### Sound
 
-- **Voices:** a drone plus 3 colour voices, each with main and detuned partials (+1/256, about 7 cents) and harmonics 2-6.
-  The upper harmonics follow the note's level, so notes brighten at the start and warm as they decay.
+- **Voices:** a drone plus 3 colour voices, each with main and detuned partials (+1/256, about 7 cents). The main partial
+  has harmonics 1-6 and the detuned one the fundamental and 2nd. The upper harmonics (4th-6th) follow the note's level,
+  so notes brighten at the start and warm as they decay.
 - **Colour notes:** each attacks (about 3 s), holds, releases (about 5 s to -60 dB) and retriggers on its own timer,
   picking up the current chord only when quiet (`envelope.h`, `engine.h`).
-- **Drone:** an octave below the chord and about 6 dB under the colour voices.
+- **Drone:** an octave below the chord and about 15 dB under a full-level colour note.
 - **Movement:** a slow pitch drift per voice, up to about 13.5 cents, and a slow swell in each note's level and in the
   colour low-pass ([soft focus](#2-soft-focus-lfo)). Colour voices have fixed stereo places.
 - **Space:** a Schroeder reverb (`reverb.h`, 4 damped combs into 2 series feedback combs, T60 about 2.7 s), then the
@@ -252,21 +276,22 @@ this firmware needs no web port. `.github/workflows/pages.yml` builds it at the 
 targets come from the reference recording, a Debussy "Reverie" on a modular synth. The ear is the final judge; these
 numbers guide the work.
 
-| Metric                           | `5beb646` | `e4762d8` | With soft focus | Target        |
-| -------------------------------- | --------- | --------- | --------------- | ------------- |
-| Envelope range p95-p10 (1 s RMS) | 11.4 dB   | 11.0 dB   | 14.1 dB         | 15+ dB        |
-| Spectral centroid                | 193 Hz    | 169 Hz    | 169 Hz          | 350-500 Hz    |
-| 20-100 Hz band                   | -3.6 dB   | -3.5 dB   | -3.5 dB         | -15 to -25 dB |
-| 1.6-3.2 kHz band                 | -39 dB    | -44 dB    | -47 dB          | -25 to -35 dB |
-| L/R correlation                  | 0.51      | 0.49      | 0.49            | 0.3-0.5       |
-| Clipped samples                  | 0         | 0         | 0               | 0             |
+| Metric                           | `5beb646` | `e4762d8` | Soft focus | Rebalanced | Target        |
+| -------------------------------- | --------- | --------- | ---------- | ---------- | ------------- |
+| Envelope range p95-p10 (1 s RMS) | 11.4 dB   | 11.0 dB   | 14.1 dB    | 21.4 dB    | 15+ dB        |
+| Spectral centroid                | 193 Hz    | 169 Hz    | 169 Hz     | 407 Hz     | 350-500 Hz    |
+| 20-100 Hz band                   | -3.6 dB   | -3.5 dB   | -3.5 dB    | -14.3 dB   | -15 to -25 dB |
+| 1.6-3.2 kHz band                 | -39 dB    | -44 dB    | -47 dB     | -30 dB     | -25 to -35 dB |
+| L/R correlation                  | 0.51      | 0.49      | 0.49       | 0.46       | 0.3-0.5       |
+| Clipped samples                  | 0         | 0         | 0          | 0          | 0             |
 
 `5beb646` is the commit the earlier table was taken on, re-measured with this script. The earlier figures for envelope
 range (7.7 dB), centroid (236 Hz) and the 20-100 Hz band (-8 dB) couldn't be reproduced from that commit, so they came
 from different definitions and aren't comparable. How the Target column was measured isn't recorded, so treat its
 envelope, centroid and band targets as approximate until the reference is measured with this script. Bands are dB below
 the total power. Between `5beb646` and `e4762d8` the centroid fell 24 Hz and the 1.6-3.2 kHz band fell 5 dB, which fits the register
-limits holding notes lower. The soft-focus filter sweep lowered the 1.6-3.2 kHz band by another 3 dB, because it only dips.
+limits holding notes lower. The soft-focus filter sweep lowered the 1.6-3.2 kHz band by another 3 dB, because it only dips. Overall level is not
+a target: it went from -24.9 dBFS RMS (soft focus) to -29.4 dBFS (rebalanced).
 
 **Note rate.** `tests/engine_test.c`, host only: 4 seeds x 6 scales x 4 drifts x 3 simulated hours per density, with a
 voice counted as quiet 6 s after its note off. The D2 to D3 step is the smallest (19%, against 33-47%), because most of a

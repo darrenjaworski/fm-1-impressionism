@@ -37,6 +37,7 @@ run "FM-1 long.txt rendered again: byte-identical WAV" sh -c "sh tests/run_host.
 audio "FM-1 pause.txt: no clipping, not silent, and the last second of the pause (24-25 s) 40 dB below the second before it (19-20 s)" pause --drop 24:25 19:20 40
 audio "FM-1 scales.txt: no clipping, not silent, through all six scales" scales
 audio "FM-1 droneoff.txt, 3 minutes with the drone off: no clipping, not silent" droneoff
+audio "FM-1 worstcase.txt, 4 minutes at density 3, drift 3, colour 31 in all six scales: no clipping, not silent" worstcase
 
 $CC -DBOARD_SMK37=1 -Ifirmware/hal -o "$OUT/smk_flash_test" tests/smk_flash_test.c
 run "SMK-37 flash map: settings, blobs, owner tag, slots in the store; never the head, BTIF/USRTRIM, USR, key_mac" "$OUT/smk_flash_test"

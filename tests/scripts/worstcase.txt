@@ -1,0 +1,12 @@
+# The loudest the sound can get: density 3, drift 3, colour 31 (the filter fully open), 40 s in each of the six scales
+# (ENC_SELECT is encoder 0, ENC_ALGORITHM 1, ENC_KNOB1 2 and ENC_KNOB2 3 on the host). tests/wav_check.py checks the
+# render for clipping.
+500 enc 1 3
+600 enc 2 3
+700 enc 3 31
+40000 enc 0 1
+80000 enc 0 1
+120000 enc 0 1
+160000 enc 0 1
+200000 enc 0 1
+240000 end

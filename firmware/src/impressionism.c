@@ -81,13 +81,15 @@ static const uint32_t filter_lfo_inc = 2742546u;  /* 0.11 Hz, per block: 0.11 * 
 static uint32_t filter_lfo_ph;                  /* the filter's own LFO phase (audio ISR only) */
 static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
 static env_t env[NV - 1u];                     /* colour voices: env[v] is voice[v + 1]. Each note attacks, holds, releases (envelope.h) */
-#define HARM_FUND 22938                         /* the main partial's mix, Q15: fundamental 0.70, 2nd 0.20, 3rd 0.10 (sums to 1) */
-#define HARM_2 6554
-#define HARM_3 3277
-#define HARM_4 2000                             /* 4th..6th partials, scaled by the note's brightness (see app_audio) */
-#define HARM_5 1300
-#define HARM_6 650
-#define DRONE_FULL 4000                         /* the pedal sits ~6 dB under the colour voices, else it swamps the spectrum */
+#define HARM_FUND 13107                         /* the main partial's mix, Q15: fundamental 0.40, 2nd 0.35, 3rd 0.25 (sums to 1) */
+#define HARM_2 11469
+#define HARM_3 8192
+#define HARM_4 8000                             /* 4th..6th partials, scaled by the note's brightness (see app_audio): 0.24, 0.16, 0.08 at full */
+#define HARM_5 5200
+#define HARM_6 2600
+#define DET_FUND 13107                          /* the detuned partial's mix, Q15: fundamental 0.40, 2nd harmonic 0.60 (sums to 1). A pure */
+#define DET_2 19661                             /* fundamental here held the centroid near 250 Hz whatever the main partial did */
+#define DRONE_FULL 1500                         /* the pedal sits ~15 dB under a full colour note: at 4000 it held nearly all the power below 100 Hz */
 
 /* ISR envelope glide: smooth the envelope toward the amp level per block (~5.8 ms) to avoid clicks.
    Applied only to the drone; colour voices are shaped by envelope.h's attack/release. */
@@ -140,7 +142,7 @@ static void app_audio(int32_t *out, uint32_t n)
         for (i = 0; i < n; i++) {
             int32_t h = (sine(ph) * HARM_FUND + sine(ph << 1) * HARM_2 + sine(ph + (ph << 1)) * HARM_3) >> 15;
             int32_t up = (sine(ph << 2) * HARM_4 + sine((ph << 2) + ph) * HARM_5 + sine(ph * 6u) * HARM_6) >> 15;
-            int32_t s_main = ((h + ((up * bright) >> 15)) * amp) >> 15, s_det = (sine(ph_d) * amp) >> 15;
+            int32_t s_main = ((h + ((up * bright) >> 15)) * amp) >> 15, s_det = (((sine(ph_d) * DET_FUND + sine(ph_d << 1) * DET_2) >> 15) * amp) >> 15;
             ph += step;
             ph_d += step_d;
             out[2u * i] += (((3 * s_main + s_det) >> 2) * pan_l[v]) >> 15;     /* L leans on the main partial... */
