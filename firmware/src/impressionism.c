@@ -45,6 +45,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
 #include "settings.h"                           /* the seven saved settings, their defaults and checks */
+#include "moods.h"                              /* the eight moods: factory settings, names, the dial */
 #include "engine.h"                             /* the generative engine: what plays and when, as events */
 #include "synth.h"                              /* sine, the phase step table, note_to_inc, pitch_drift */
 #include "scene.h"                              /* the lily pond */
@@ -210,6 +211,12 @@ static uint32_t quiet_mask(void)
 /* ---- settings (what survives a power-off, settings.h) */
 static settings_t set;
 
+/* ---- moods (moods.h): each mood's blob is one settings_t in flash, read once at boot into mood_store. A mood whose bit
+   in mood_saved_mask is clear has no valid blob and uses its factory settings. */
+typedef char mood_count_matches_blobs[MOOD_COUNT == NBLOB ? 1 : -1];
+static settings_t mood_store[MOOD_COUNT];
+static uint32_t mood_saved_mask;
+
 static int32_t color_to_filter_k(uint32_t color) { return 1024 + (int32_t)color * 1024; }   /* 0..31 -> 1024..32768 */
 
 /* ---- the screen: a lily pond (scene.h), plus a small status-text overlay below it */
@@ -241,6 +248,13 @@ static void draw_pond(void)
     cv_blit(0, POND_Y);
 }
 
+#define TITLE_Y 18
+#define TITLE_NAME_MS 3000u                     /* a mood's name replaces the title for this long, then the title returns */
+static void draw_title(const char *text)        /* draw_text_box clears its own box, so a new text covers the old one */
+{
+    draw_text_box(0, TITLE_Y, 240, &FONT_L, text, C_ACC, 1);
+}
+
 static void draw_chrome(void)                   /* once, at startup only: the black screen and the title never
                                                      change again, so they never belong in a function called on
                                                      every redraw tick (docs/RULES.md: "draw only what changed" --
@@ -249,7 +263,7 @@ static void draw_chrome(void)                   /* once, at startup only: the bl
                                                      ~3 Hz stutter on real hardware) */
 {
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
+    draw_title(APP_NAME);
 }
 
 static void draw_status(void)                   /* only on a real settings/chord change, not every pond tick */
@@ -297,6 +311,9 @@ static void draw_seed(void) {}
 static void app_main(void)
 {
     uint32_t t_change = 0, dirty = 0, scale_drawn = ~0u, state_drawn, next_draw_ms, b, rel, st, n, v;
+    uint32_t title_until = 0u;                  /* when the mood's name hands the title back (0: the title is showing) */
+    uint32_t save_pending = 0u, save_mood = 0u, t_save = 0u;   /* BTN_SAVE: a write waiting for a quiet moment */
+    settings_t save_snap;                       /* what BTN_SAVE saves: the settings as they were at the press */
     uint32_t seed = 0x9E3779B9u;                /* host: a fixed seed (never 0) */
     int32_t e;
 
@@ -315,6 +332,9 @@ static void app_main(void)
 #endif
     }
 #endif
+    for (v = 0; v < MOOD_COUNT; v++)            /* the moods saved so far; a blob of another size or mood reads as empty */
+        if (!blob_load(v, &mood_store[v], sizeof mood_store[v]) && mood_blob_ok(&mood_store[v], v))
+            mood_saved_mask |= 1u << v;
     filter_k = color_to_filter_k(set.color);
     n = engine_init(&eng, seed, &set, fm1_ms, events);   /* a real root and chord already in place, the first waits */
     apply_events(n);
@@ -356,7 +376,23 @@ static void app_main(void)
             set.voice_lead = knob_apply(set.voice_lead, e, 3u);
             dirty = 1; t_change = fm1_ms;
         }
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {  /* the mood dial: loads a mood into the live settings, doesn't save */
+            v = mood_step(set.mood, e);
+            if ((mood_saved_mask >> v) & 1u) settings_copy(&set, &mood_store[v]);
+            else mood_factory(&set, v);
+            filter_k = color_to_filter_k(set.color);   /* the scale change, if any, is picked up below like ENC_SELECT's */
+            draw_title(((mood_saved_mask >> v) & 1u) ? mood_saved_name(v) : mood_piece_name(v));
+            title_until = fm1_ms + TITLE_NAME_MS;
+            dirty = 1; t_change = fm1_ms;
+        }
         b = fm1_input_edges(&rel);
+        if (b & (1u << BTN_SAVE)) {                  /* keep the settings as they are now; the write waits for a quiet moment */
+            settings_copy(&save_snap, &set);
+            save_mood = set.mood;
+            save_pending = 1u;
+            t_save = fm1_ms;
+        }
+        fm1_led_key(BTN_SAVE, save_pending != 0u);   /* lit while a save is waiting, out once it is written */
         if (b & (1u << BTN_ARP)) { set.drone_on ^= 1u; dirty = 1; t_change = fm1_ms; }
         fm1_led_key(BTN_ARP, set.drone_on);
         if (b & (1u << BTN_PLAY)) {                  /* pause/resume: freezes generation; the sound fades out (app_audio) */
@@ -404,9 +440,23 @@ static void app_main(void)
         /* settings save: prefer a quiet moment (no audible glitch from the erase, docs/RULES.md). While paused the sound
            has faded out, so save then; otherwise wait for 30 s without a change, since this is an ambient instrument
            that may rarely go fully silent -- don't wait forever for one. Never sooner than 2 s after the last change. */
-        if (dirty && fm1_ms - t_change > 2000u && (paused || fm1_ms - t_change > 30000u)) {
+        if (save_pending && save_due(fm1_ms, t_save, paused)) {   /* the mood's blob: its own sector, so no other mood is rewritten */
+            if (blob_save(save_mood, &save_snap, sizeof save_snap) == 0) {
+                settings_copy(&mood_store[save_mood], &save_snap);
+                mood_saved_mask |= 1u << save_mood;
+                draw_title(mood_saved_name(save_mood));   /* it's now saved over: it reads MOOD n from here on */
+                title_until = fm1_ms + TITLE_NAME_MS;
+            }
+            save_pending = 0u;
+            if (dirty) { settings_save(&set, sizeof set); dirty = 0; }   /* one quiet moment for both writes */
+        }
+        if (dirty && save_due(fm1_ms, t_change, paused)) {
             settings_save(&set, sizeof set);
             dirty = 0;
+        }
+        if (title_until && (int32_t)(fm1_ms - title_until) >= 0) {   /* the name has been up long enough */
+            draw_title(APP_NAME);
+            title_until = 0u;
         }
     }
 }

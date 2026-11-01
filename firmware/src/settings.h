@@ -52,3 +52,24 @@ static inline uint32_t settings_state_word(const settings_t *s, uint32_t chord_t
     return (uint32_t)s->density | (uint32_t)s->drift << 2 | (uint32_t)s->drone_on << 4 | (uint32_t)s->color << 5 |
            chord_templ << 10 | (uint32_t)s->scale << 13 | (uint32_t)s->voice_lead << 16 | (uint32_t)s->mood << 18;
 }
+
+/* dst = src, field by field: a struct assignment can compile to a memcpy call the device build doesn't have */
+static inline void settings_copy(settings_t *dst, const settings_t *src)
+{
+    dst->scale = src->scale;
+    dst->density = src->density;
+    dst->drift = src->drift;
+    dst->color = src->color;
+    dst->drone_on = src->drone_on;
+    dst->voice_lead = src->voice_lead;
+    dst->mood = src->mood;
+}
+
+/* when a flash write may happen: a flash erase drops the sound for about 50 ms (docs/RULES.md). Never within 2 s of the
+   change that asked for it. Then at once if paused (the sound has faded out), and while playing only after 30 s, since
+   this is an ambient instrument that may rarely go fully silent: don't wait forever for a quiet moment. now_ms may wrap. */
+static inline int save_due(uint32_t now_ms, uint32_t changed_ms, uint32_t paused)
+{
+    uint32_t since = now_ms - changed_ms;
+    return since > 2000u && (paused || since > 30000u);
+}

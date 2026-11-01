@@ -39,6 +39,8 @@ audio "FM-1 scales.txt: no clipping, not silent, through all six scales" scales
 audio "FM-1 droneoff.txt, 3 minutes with the drone off: no clipping, not silent" droneoff
 audio "FM-1 worstcase.txt, 4 minutes at density 3, drift 3, colour 31 in all six scales: no clipping, not silent" worstcase
 audio "FM-1 voicelead.txt, 3 minutes with ENC_KNOB3 at 3: no clipping, not silent" voicelead
+echo "== FM-1 moods.txt: the mood dial and BTN_SAVE, three saves (while playing, with the dial turned mid-wait, while paused) land at the right times in mood 1's blob only"
+sh tests/run_host.sh tests/scripts/moods.txt > "$OUT/moods_run.log" && python3 tests/wav_check.py build/host/impressionism.wav && python3 tests/moods_check.py "$OUT/moods_run.log" || fail=1
 
 $CC -DBOARD_SMK37=1 -Ifirmware/hal -o "$OUT/smk_flash_test" tests/smk_flash_test.c
 run "SMK-37 flash map: settings, blobs, owner tag, slots in the store; never the head, BTIF/USRTRIM, USR, key_mac" "$OUT/smk_flash_test"
@@ -54,6 +56,8 @@ $CC -o "$OUT/status_test" tests/status_test.c
 run "the status-text overlay's pure logic: every scale, drone, density and knob line fits the 240 px row" "$OUT/status_test"
 $CC -o "$OUT/reverb_test" tests/reverb_test.c
 run "Schroeder reverb: deterministic, bounded, T60 by the T30 method, a sustained full-scale input" "$OUT/reverb_test"
+$CC -o "$OUT/moods_test" tests/moods_test.c
+run "the moods and the save timing rule: the factory table against ROADMAP.md, names, the wrapping dial, blob checks, save_due" "$OUT/moods_test"
 $CC -o "$OUT/envelope_test" tests/envelope_test.c
 run "voice envelope: attack, exponential release, quiet threshold" "$OUT/envelope_test"
 $CC -o "$OUT/engine_test" tests/engine_test.c

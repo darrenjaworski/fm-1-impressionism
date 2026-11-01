@@ -138,6 +138,7 @@ firmware/src/platform.c       # infra: boot, USB, MIDI, update loader, audio ISR
 firmware/src/planing.h        # pure logic: scales, chord templates, the planing picker, note scheduler
 firmware/src/engine.h         # pure engine: what plays and when (drone, chord, timers, held notes, pause/resume) as events
 firmware/src/settings.h       # pure: the seven saved settings (same bytes in flash), defaults, range checks, the screen's state word
+firmware/src/moods.h          # pure: the eight moods (factory settings, names, the dial), on ENC_PRESETS and BTN_SAVE
 firmware/src/synth.h          # pure synthesis helpers: sine, phase steps, note_to_inc, pitch_drift
 firmware/src/status.h         # pure: the status-text lines under the pond
 firmware/src/envelope.h       # per-note attack/release envelope (colour voices), testable on the host

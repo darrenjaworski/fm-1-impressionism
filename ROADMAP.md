@@ -17,7 +17,7 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 - **Biggest gap in the sound:** none on the host numbers, which are at or near every target
   ([Measurements](#measurements)). Whether it sounds right is unheard: the rebalanced spectrum is about 4.5 dB quieter
   overall and brighter, and the drone is much further back.
-- **Biggest gap in the panel:** `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
+- **Biggest gap in the panel:** `ENC_KNOB4` and the keybed do nothing yet.
 - **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, before the soft-focus LFO and one more
   `sine()` per sample per voice. It needs re-measuring on the FM-1.
 
@@ -32,7 +32,7 @@ it. Anything that adds a saved setting comes before moods because moods store th
 | 2   | [Soft-focus LFO](#2-soft-focus-lfo) (done)                         | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
 | 3   | [Spectral balancing](#3-spectral-balancing) (done)                 | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
 | 4   | [Voice leading and settings](#4-voice-leading-and-settings) (done) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
-| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)                      | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
+| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save) (host done)          | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
 | 6   | [Sleep timer](#6-sleep-timer)                                      | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
 | 7   | [Key sets the drone root](#7-key-sets-the-drone-root)              | Medium | Small  | No        | First use of the keybed; completes the panel                           |
 | 8   | [Hub submission](#8-hub-submission)                                | High   | Medium | No        | Reaches listeners; the controls and sound should be final first        |
@@ -134,42 +134,58 @@ nothing sets it yet: item 5 does.
 
 ### 5. Moods and `BTN_SAVE`
 
-**`ENC_PRESETS` steps through 8 moods.** Turning it loads a mood straight into `set`; it doesn't save.
+Done and tested on the host; not heard or seen on the FM-1.
 
-- **Applying a mood:** go through the same steps as the knobs, including `engine_scale_changed()` when the scale differs
-  and `color_to_filter_k()` for the filter.
-- **Storage:** one blob per mood (`blob_load`/`blob_save`, `store.h`), holding a `settings_t`. A blob is one 4 KiB sector,
-  so a save erases about 50 ms, against about 200 ms for a slot's four sectors, and never rewrites another mood.
+**`ENC_PRESETS` steps through 8 moods,** wrapping from the last to the first and back. Turning it loads a mood straight into
+`set`; it doesn't save.
+
+- **Applying a mood:** it copies the mood's settings into `set` and sets `filter_k` from its colour. A different scale is
+  then picked up by the same check that handles `ENC_SELECT`, which calls `engine_scale_changed()`. Density, drift, voice
+  leading and the drone are read every tick, so they take effect at once.
+- **Storage:** one blob per mood (`blob_load`/`blob_save`, `store.h`), holding a `settings_t`. All 8 are read once at boot
+  into RAM (`mood_store`). A blob is one 4 KiB sector, so a save erases about 50 ms, against about 200 ms for a slot's four
+  sectors, and never rewrites another mood. A blob of another size, or one whose `mood` isn't its own slot's, reads as empty.
 - **Why 8:** it's a usability choice, not a storage limit. One blob could hold about 800, but a dial is only useful if its
   stops can be learned.
 
 **Moods are named after pieces, not composers.** Debussy and Ravel share too much harmonic language for a composer to pin
-down a sound, while a piece gives concrete choices. Each mood's factory settings sit in a const table, used while its
-blob is empty. The numbers are starting guesses, to tune by ear after item 3, and each mood also needs a voice-leading
-value:
+down a sound, while a piece gives concrete choices. Each mood's factory settings sit in a const table (`MOOD_FACTORY`,
+`moods.h`), used while its blob is empty. The numbers are starting guesses, to tune by ear. The voice-leading column is
+new in this step and is a guess too: loose for the busy pieces, held for the still ones.
 
-| #   | Mood                                    | Scale            | Density | Drift | Colour | Drone |
-| --- | --------------------------------------- | ---------------- | ------- | ----- | ------ | ----- |
-| 1   | Voiles (Debussy)                        | Whole-tone       | 0       | 0     | 10     | On    |
-| 2   | Clair de lune (Debussy)                 | Pentatonic       | 1       | 1     | 16     | Off   |
-| 3   | Arabesque No. 1 (Debussy)               | Pentatonic       | 3       | 2     | 28     | Off   |
-| 4   | Pagodes (Debussy)                       | Pentatonic       | 2       | 1     | 24     | Off   |
-| 5   | La cathédrale engloutie (Debussy)       | Pentatonic       | 0       | 2     | 8      | On    |
-| 6   | Sarabande, _Pour le piano_ (Debussy)    | Dorian           | 1       | 2     | 14     | Off   |
-| 7   | Pavane pour une infante défunte (Ravel) | Mixolydian       | 1       | 1     | 12     | On    |
-| 8   | Le gibet (Ravel)                        | Minor pentatonic | 0       | 0     | 6      | On    |
+| #   | Mood                                    | Scale            | Density | Drift | Colour | Drone | Voice |
+| --- | --------------------------------------- | ---------------- | ------- | ----- | ------ | ----- | ----- |
+| 1   | Voiles (Debussy)                        | Whole-tone       | 0       | 0     | 10     | On    | 2     |
+| 2   | Clair de lune (Debussy)                 | Pentatonic       | 1       | 1     | 16     | Off   | 2     |
+| 3   | Arabesque No. 1 (Debussy)               | Pentatonic       | 3       | 2     | 28     | Off   | 0     |
+| 4   | Pagodes (Debussy)                       | Pentatonic       | 2       | 1     | 24     | Off   | 1     |
+| 5   | La cathédrale engloutie (Debussy)       | Pentatonic       | 0       | 2     | 8      | On    | 3     |
+| 6   | Sarabande, _Pour le piano_ (Debussy)    | Dorian           | 1       | 2     | 14     | Off   | 2     |
+| 7   | Pavane pour une infante défunte (Ravel) | Mixolydian       | 1       | 1     | 12     | On    | 2     |
+| 8   | Le gibet (Ravel)                        | Minor pentatonic | 0       | 0     | 6      | On    | 3     |
 
 The moods evoke the pieces rather than quote them: the notes stay generated, and the root is fixed around C
 (`ROOT_BASE_NOTE`), so no mood is in its piece's key. There's no major scale, so major pentatonic stands in for the
 major-key pieces: all its notes belong to the major scale, while Lydian and Mixolydian each have one that doesn't. Ravel's
 two are the loosest fits, and the Sarabande's Dorian should be checked against the score. Lydian is unused.
 
-**`BTN_SAVE` writes the live settings to the selected mood's blob.** It follows the same rule as settings today, because
-an erase drops the sound for about 50 ms: save 2 s after the press if paused, otherwise wait up to 30 s. `BTN_SAVE`'s LED
-stays lit while a save is pending and goes out when it's written.
+**`BTN_SAVE` writes the settings to the selected mood's blob.** It keeps the settings as they were at the press, so turning
+the mood dial before the write can't put another mood's settings in the wrong blob. It follows the same rule as the live
+settings (`save_due()`, `settings.h`), because an erase drops the sound for about 50 ms: the write comes 2 s after the press
+if paused, otherwise up to 30 s after. Pressing again replaces the waiting save and restarts the wait. `BTN_SAVE`'s LED
+stays lit while a save is waiting and goes out when it's written. The live settings are written at the same moment if they
+have changed, so there's one quiet moment for both.
 
-**Names:** a piece's name only describes its factory settings, so it shows while the blob is empty, and `MOOD 1` to
-`MOOD 8` once saved over. Where it goes on the screen is still to decide; the three status rows are full.
+**Names:** the name shows in the title slot, where `IMPRESSIONISM` is, for 3 s after the dial turns, then the title returns.
+The status rows are full, so this adds no row. It reads the piece's name (`VOILES`, `CLAIR DE LUNE`, `ARABESQUE`,
+`PAGODES`, `CATHEDRALE`, `SARABANDE`, `PAVANE`, `LE GIBET`) while the blob is empty, and `MOOD 1` to `MOOD 8` once saved
+over. It shows `MOOD n` for 3 s after a save is written, as the confirmation. The names are capitals without accents, 15
+characters at most, to fit the title row in `FONT_L`.
+
+**Checked on the host** (`tests/moods_test.c`, `tests/moods_check.py` on `tests/scripts/moods.txt`): the factory table
+against the table above, the dial wrapping, the blob checks, `save_due()` across an ms-counter wrap, and three writes at
+their expected times (while playing, with the dial turned mid-wait, and while paused), all in the right blob. The screens
+read as designed.
 
 ### 6. Sleep timer
 
@@ -254,6 +270,8 @@ the saved settings.
 | `ENC_KNOB1`          | drift: how far each chord move or re-root steps, 0-3              |
 | `ENC_KNOB2`          | colour: the low-pass on the final mix, 0 darkest to 31 fully open |
 | `ENC_KNOB3`          | voice leading: how much a chord move keeps the old chord's notes  |
+| `ENC_PRESETS`        | mood: steps through 8 saved moods, loading each (doesn't save)    |
+| `BTN_SAVE`           | saves the settings into the selected mood. LED lit while waiting  |
 | `BTN_ARP`            | drone on/off, LED lit when on                                     |
 | `BTN_PLAY`           | pause/resume: 45 ms fade, timers frozen. LED lit while generating |
 | MASTER               | volume                                                            |
@@ -263,7 +281,7 @@ the saved settings.
 item 6 fills it in. The dev overlays `ISR_TIMING` and `SEED_SHOW` share the bottom row, so enable only one at a time.
 
 **Saving:** the seven settings persist across power-off (`settings_save`). A save waits for 2 s after the last change while
-paused, or 30 s while playing, because the flash erase interrupts the sound.
+paused, or 30 s while playing, because the flash erase interrupts the sound. Moods save separately, on `BTN_SAVE`.
 
 ### Screen
 

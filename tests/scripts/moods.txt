@@ -1,0 +1,34 @@
+# The mood dial (ENC_PRESETS, encoder 6 on the host) and BTN_SAVE (button 9). BTN_PLAY is button 12. Moods are counted from
+# 0 here: 1 is Clair de lune, 2 Arabesque, 3 Pagodes. tests/moods_check.py checks the three flash writes below.
+500 enc 6 1
+# Clair de lune: PENTATONIC DRONE OFF D1, DRIFT 1 COLOUR 16, VOICE 2, the title reads CLAIR DE LUNE
+1000 shot
+# 3 s on, the title is back
+5000 shot
+# colour 16 -> 21, then save while playing: the write waits 30 s (about 36.5 s)
+6000 enc 3 5
+6500 btn 9
+# written: the title reads MOOD 2, colour 21
+37000 shot
+41000 enc 6 1
+# Arabesque, from the factory table: DENSITY 3, COLOUR 28
+41500 shot
+45000 enc 6 -1
+# back on mood 1, now from flash: colour 21, the title reads MOOD 2
+45500 shot
+# colour back to 16 and save, then turn the dial to mood 3 before the write (about 80.1 s): the blob still gets colour 16
+50000 enc 3 -5
+50100 btn 9
+50500 enc 6 2
+# Pagodes is live now: COLOUR 24
+60000 shot
+85000 enc 6 -2
+# mood 1 again, colour 16 from the second save
+85500 shot
+# colour 19, pause, save: while paused the write comes after 2 s (about 88.1 s)
+85600 enc 3 3
+86000 btn 12
+86100 btn 9
+88500 shot
+89000 btn 12
+92000 end
