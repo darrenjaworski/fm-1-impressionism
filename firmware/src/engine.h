@@ -79,26 +79,35 @@ static uint32_t engine_flush_drone(engine_t *e, engine_event_t *ev, uint32_t n)
     return n + 1u;
 }
 
+/* the chord now sounding, as a root in semitones from the scale's root (what pick_chord_led compares the next chord to) */
+static int32_t engine_chord_root_st(const engine_t *e, uint32_t scale)
+{
+    return scale_degree_to_semitone(scale, e->home_degree + e->plane_degree);
+}
+
 /* the drone re-roots on its own slow timer (60-180 s), using the drift rate for its step size, and the chord goes back
-   onto the new root (ROADMAP.md's design choice) */
-static void engine_reroot(engine_t *e, const settings_t *s, uint32_t now_ms)
+   onto the new root (ROADMAP.md's design choice). lead is the voice leading, 0..3: how strongly the new chord keeps the
+   old one's notes. Boot and a scale change pass 0, since there is no old chord to keep (every voice starts afresh). */
+static void engine_reroot(engine_t *e, const settings_t *s, uint32_t now_ms, uint32_t lead)
 {
     int32_t walked = plan_next(e->home_degree, s->drift, &e->rng);
+    int32_t root_old = engine_chord_root_st(e, s->scale);
     e->home_degree = clamp_register(s->scale, walked, HOME_MIN_ST, HOME_MAX_ST);
     e->plane_degree = 0;
-    e->chord_templ = pick_chord(s->scale, e->home_degree, &e->rng);
+    e->chord_templ = pick_chord_led(s->scale, e->home_degree, &e->rng, root_old, e->chord_templ, lead);
     e->drone_note = engine_drone_note_for(s->scale, e->home_degree);
     e->drone_pending = 1;
     e->next_root_ms = now_ms + 60000u + rng_next(&e->rng) % 120001u;   /* 60-180 s: much slower than any plane rate */
 }
 
-/* the chord re-planes on the density timer (ENC_ALGORITHM): a new root and chord, no notes */
-static void engine_replane(engine_t *e, const settings_t *s, uint32_t now_ms)
+/* the chord re-planes on the density timer (ENC_ALGORITHM): a new root and chord, no notes. lead as for engine_reroot */
+static void engine_replane(engine_t *e, const settings_t *s, uint32_t now_ms, uint32_t lead)
 {
     int32_t walked = plan_next(e->plane_degree, s->drift, &e->rng);
     int32_t root = clamp_register(s->scale, e->home_degree + walked, ROOT_MIN_ST, ROOT_MAX_ST);
+    int32_t root_old = engine_chord_root_st(e, s->scale);
     e->plane_degree = root - e->home_degree;
-    e->chord_templ = pick_chord(s->scale, root, &e->rng);
+    e->chord_templ = pick_chord_led(s->scale, root, &e->rng, root_old, e->chord_templ, lead);
     e->next_plane_ms = now_ms + next_trigger_ticks(s->density, &e->rng);
 }
 
@@ -132,8 +141,8 @@ static uint32_t engine_init(engine_t *e, uint32_t seed, const settings_t *s, uin
         e->held[v] = 0u;
         e->left_note_ms[v] = 0;
     }
-    engine_reroot(e, s, now_ms);
-    engine_replane(e, s, now_ms);
+    engine_reroot(e, s, now_ms, 0u);
+    engine_replane(e, s, now_ms, 0u);
     for (v = 0; v < ENGINE_VOICES; v++)
         e->next_note_ms[v] = now_ms + next_trigger_ticks(s->density, &e->rng);
     return engine_flush_drone(e, ev, 0u);
@@ -145,8 +154,8 @@ static uint32_t engine_tick(engine_t *e, uint32_t now_ms, const settings_t *s, u
 {
     uint32_t v, n = 0u;
     if (e->paused) return 0u;
-    if ((int32_t)(now_ms - e->next_root_ms) >= 0) engine_reroot(e, s, now_ms);
-    if ((int32_t)(now_ms - e->next_plane_ms) >= 0) engine_replane(e, s, now_ms);
+    if ((int32_t)(now_ms - e->next_root_ms) >= 0) engine_reroot(e, s, now_ms, s->voice_lead);
+    if ((int32_t)(now_ms - e->next_plane_ms) >= 0) engine_replane(e, s, now_ms, s->voice_lead);
     for (v = 0; v < ENGINE_VOICES; v++) {
         if (e->held[v]) {
             if ((int32_t)(now_ms - e->note_off_ms[v]) >= 0) {
@@ -204,7 +213,7 @@ static uint32_t engine_scale_changed(engine_t *e, uint32_t now_ms, const setting
     e->home_degree = 0;
     e->plane_degree = 0;
     for (v = 0; v < ENGINE_VOICES; v++) e->next_note_ms[v] = now_ms;
-    engine_reroot(e, s, now_ms);
-    engine_replane(e, s, now_ms);
+    engine_reroot(e, s, now_ms, 0u);
+    engine_replane(e, s, now_ms, 0u);
     return engine_flush_drone(e, ev, 0u);
 }

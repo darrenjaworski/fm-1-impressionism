@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The status text under the lily pond (impressionism.c's draw_status): the scale, drone and density on the top
- * row, the knob values on the next. Pure functions only, no platform dependency (no fm1_*, no screen calls, no
+ * row, the knob values on the next, then voice leading and the sleep slot. Pure functions only, no platform dependency (no fm1_*, no screen calls, no
  * floats) -- so tests/status_test.c checks every line with the system compiler. Integers only, per docs/RULES.md.
  * Each line must fit the 240 px row in FONT_S: 29 characters at most (tests/status_test.c). */
 #pragma once
@@ -43,5 +43,15 @@ static void status_knobs(char *s, uint32_t drift, uint32_t color)
     i = put_dec(s, i, drift);
     i = str_put(s, i, "  COLOUR ");
     i = put_dec(s, i, color);
+    s[i] = 0;
+}
+
+/* the bottom row, e.g. "VOICE 2  SLEEP --": ENC_KNOB3 voice leading (0..3), then the sleep timer's slot, which stays "--"
+   until it is built. s needs 18 bytes */
+static void status_bottom(char *s, uint32_t voice_lead)
+{
+    uint32_t i = str_put(s, 0, "VOICE ");
+    i = put_dec(s, i, voice_lead);
+    i = str_put(s, i, "  SLEEP --");
     s[i] = 0;
 }

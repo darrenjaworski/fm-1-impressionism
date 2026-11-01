@@ -44,7 +44,7 @@ static void app_idle(void) {}                   /* nothing to do while the scree
                                                      ~57.6 KB of the 336 KB pool, comfortably within budget. */
 #include "platform.c"
 #include "planing.h"                            /* scales, chord templates, the planing picker, the scheduler */
-#include "settings.h"                           /* the five saved settings, their defaults and checks */
+#include "settings.h"                           /* the seven saved settings, their defaults and checks */
 #include "engine.h"                             /* the generative engine: what plays and when, as events */
 #include "synth.h"                              /* sine, the phase step table, note_to_inc, pitch_drift */
 #include "scene.h"                              /* the lily pond */
@@ -254,12 +254,13 @@ static void draw_chrome(void)                   /* once, at startup only: the bl
 
 static void draw_status(void)                   /* only on a real settings/chord change, not every pond tick */
 {
-    char s[32], k[32];
+    char s[32], k[32], b[32];
     status_top(s, set.scale, set.drone_on, set.density);                 /* the scale, drone and density */
     draw_text_box(0, POND_Y + POND_H * CELL_PX + 6u, 240, &FONT_S, s, C_WHITE, 1);
     status_knobs(k, set.drift, set.color);                               /* ENC_KNOB1 drift, ENC_KNOB2 colour */
     draw_text_box(0, POND_Y + POND_H * CELL_PX + 26u, 240, &FONT_S, k, C_OFF, 1);
-    draw_text_box(0, POND_Y + POND_H * CELL_PX + 46u, 240, &FONT_S, "VOICE --  SLEEP --", C_OFF, 1);
+    status_bottom(b, set.voice_lead);                                    /* ENC_KNOB3 voice leading, and the sleep slot */
+    draw_text_box(0, POND_Y + POND_H * CELL_PX + 46u, 240, &FONT_S, b, C_OFF, 1);
 }
 
 #if ISR_TIMING && !defined(DINGHY_HOST)
@@ -349,6 +350,10 @@ static void app_main(void)
         if ((e = fm1_enc_take(ENC_KNOB2)) != 0) {
             set.color = knob_apply(set.color, e, 31u);
             filter_k = color_to_filter_k(set.color);
+            dirty = 1; t_change = fm1_ms;
+        }
+        if ((e = fm1_enc_take(ENC_KNOB3)) != 0) {
+            set.voice_lead = knob_apply(set.voice_lead, e, 3u);
             dirty = 1; t_change = fm1_ms;
         }
         b = fm1_input_edges(&rel);

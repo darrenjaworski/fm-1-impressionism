@@ -5,6 +5,7 @@
  * QUIET_AFTER_OFF_MS after that. The scales are literal sets here, not the code's tables. No platform dependency:
  * $CC -o build/host/engine_test tests/engine_test.c && build/host/engine_test */
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include "../firmware/src/engine.h"
 
@@ -36,11 +37,28 @@ static int in_scale(uint32_t scale, uint32_t note)
     return 0;
 }
 
+/* the chord templates as literal semitones above the root, in planing.h's order (not the code's table) */
+static const int CHORD_ST[8][3] = { { 4, 7, 11 }, { 4, 7, 14 }, { 2, 7, 12 }, { 5, 7, 12 },
+                                    { 4, 9, 14 }, { 5, 10, 15 }, { 4, 10, 14 }, { 4, 8, 14 } };
+
+/* how many of the new chord's three notes the old chord also has, by pitch class. Roots are semitones from C, any sign */
+static uint32_t lit_shared(int32_t root_old, uint32_t t_old, int32_t root_new, uint32_t t_new)
+{
+    uint32_t a, b, n = 0u;
+    for (b = 0; b < 3u; b++) {
+        int32_t pn = ((root_new + CHORD_ST[t_new][b]) % 12 + 12) % 12;
+        for (a = 0; a < 3u; a++)
+            if (((root_old + CHORD_ST[t_old][a]) % 12 + 12) % 12 == pn) { n++; break; }
+    }
+    return n;
+}
+
 typedef struct { uint32_t t, kind, voice, note; } rec_t;   /* t: ms since the run started */
 
 typedef struct {
     uint32_t notes, drones, bad_scale, bad_register, bad_drone, bad_quiet, double_on, orphan_off;
     uint32_t paused_events, held_at_pause, max_ons, triple_ticks, too_many, log_full;
+    uint32_t moves, shared_sum;                 /* chord moves (a re-plane or re-root), and the notes each kept from the chord before */
 } stats_t;
 
 typedef struct {
@@ -109,7 +127,7 @@ static void sim_apply(sim_t *s, const engine_event_t *ev, uint32_t n, uint32_t n
 }
 
 typedef struct {
-    uint32_t seed, scale, density, drift, start, ticks;
+    uint32_t seed, scale, density, drift, lead, start, ticks;
     uint32_t pause_k, resume_k;                 /* 0: none. Pause before tick pause_k; resume in place of tick resume_k */
     uint32_t mute_k;                            /* 0: none. Before tick mute_k no voice counts as quiet */
     uint32_t log_on;
@@ -121,7 +139,8 @@ static void sim_run(sim_t *s, const run_t *c)
 {
     engine_event_t ev[ENGINE_MAX_EVENTS];
     settings_t set;
-    uint32_t k, now, n, quiet, v;
+    uint32_t k, now, n, quiet, v, t_before, plane_before, root_before;
+    int32_t root_st_before;
     int in_pause;
 
     memset(s, 0, sizeof *s);
@@ -129,6 +148,7 @@ static void sim_run(sim_t *s, const run_t *c)
     set.scale = (uint8_t)c->scale;
     set.density = (uint8_t)c->density;
     set.drift = (uint8_t)c->drift;
+    set.voice_lead = (uint8_t)c->lead;
     s->start = c->start;
     s->scale = c->scale;
     s->log_on = c->log_on;
@@ -147,8 +167,16 @@ static void sim_run(sim_t *s, const run_t *c)
             }
             engine_pause(&s->e, now);
         }
+        t_before = s->e.chord_templ;
+        plane_before = s->e.next_plane_ms;
+        root_before = s->e.next_root_ms;
+        root_st_before = scale_degree_to_semitone(c->scale, s->e.home_degree + s->e.plane_degree);
         if (c->resume_k && k == c->resume_k) n = engine_resume(&s->e, now, &set, ev);
         else n = engine_tick(&s->e, now, &set, quiet, ev);
+        if (!(c->resume_k && k == c->resume_k) && (s->e.next_plane_ms != plane_before || s->e.next_root_ms != root_before)) {
+            s->st.moves++;                      /* the chord moved: count the notes it kept (a move can land on the same chord) */
+            s->st.shared_sum += lit_shared(root_st_before, t_before, scale_degree_to_semitone(c->scale, s->e.home_degree + s->e.plane_degree), s->e.chord_templ);
+        }
         if (in_pause) s->st.paused_events += n;
         sim_apply(s, ev, n, now, quiet);
     }
@@ -162,6 +190,8 @@ static void settings_of(settings_t *s, uint32_t scale, uint32_t density, uint32_
     s->drift = (uint8_t)drift;
     s->color = (uint8_t)color;
     s->drone_on = (uint8_t)drone_on;
+    s->voice_lead = 0u;
+    s->mood = 0u;
 }
 
 static void settings_tests(void)
@@ -169,10 +199,15 @@ static void settings_tests(void)
     settings_t d, b, m;
     uint32_t base, w, all_differ = 1u;
 
-    check(sizeof(settings_t) == 5u, "settings: five one-byte fields, the same 5-byte layout as the saved flash block");
+    check(sizeof(settings_t) == 7u, "settings: seven one-byte fields, a 7-byte layout (a block saved at 5 bytes reads as nothing saved)");
+    check(offsetof(settings_t, scale) == 0u && offsetof(settings_t, density) == 1u && offsetof(settings_t, drift) == 2u &&
+          offsetof(settings_t, color) == 3u && offsetof(settings_t, drone_on) == 4u &&
+          offsetof(settings_t, voice_lead) == 5u && offsetof(settings_t, mood) == 6u,
+          "settings: the first five fields keep their places, voice_lead is byte 5 and mood byte 6");
     settings_set_defaults(&d);
     check(d.scale == 1u && d.density == 0u && d.drift == 0u && d.color == 12u && d.drone_on == 1u,
           "settings: defaults are pentatonic, density 0, drift 0, colour 12, drone on");
+    check(d.voice_lead == 0u && d.mood == 0u, "settings: voice leading defaults to 0 (the uniform pick) and mood to 0");
     check(settings_valid(&d), "settings: the defaults are valid");
 
     settings_of(&b, 5u, 3u, 3u, 31u, 1u);
@@ -189,6 +224,15 @@ static void settings_tests(void)
     check(!settings_valid(&b), "settings: drone_on 2 is rejected");
     settings_of(&b, 0u, 0u, 0u, 0u, 255u);
     check(!settings_valid(&b), "settings: a stored byte of 255 in the drone field is rejected");
+    settings_of(&b, 5u, 3u, 3u, 31u, 1u);
+    b.voice_lead = 3u; b.mood = 7u;
+    check(settings_valid(&b), "settings: voice_lead 3 and mood 7, the tops of their ranges, are valid");
+    b.voice_lead = 4u; b.mood = 0u;
+    check(!settings_valid(&b), "settings: voice_lead 4 is rejected");
+    b.voice_lead = 0u; b.mood = 8u;
+    check(!settings_valid(&b), "settings: mood 8 is rejected");
+    b.voice_lead = 255u; b.mood = 0u;
+    check(!settings_valid(&b), "settings: a stored byte of 255 in the voice_lead field is rejected");
 
     check(knob_apply(0u, -1, 3u) == 0u, "knob: from 0, one detent down stays at 0 (bottom clamp)");
     check(knob_apply(0u, -100, 31u) == 0u, "knob: a large turn down clamps at 0");
@@ -200,7 +244,15 @@ static void settings_tests(void)
     /* the state word: default settings at chord 0 are drone bit 0x10, colour 12 (0x180), scale 1 (0x2000) */
     check(settings_state_word(&d, 0u) == 0x2190u, "state word: the defaults at chord 0 are 0x2190 (scale 1, colour 12, drone on)");
     settings_of(&m, 5u, 3u, 3u, 31u, 1u);
-    check(settings_state_word(&m, 7u) == 0xBFFFu, "state word: every field at its maximum (chord 7) packs into 0xBFFF, no overlap");
+    check(settings_state_word(&m, 7u) == 0xBFFFu, "state word: the first five fields at their maximum (chord 7) pack into 0xBFFF, no overlap");
+    m.voice_lead = 3u; m.mood = 7u;
+    check(settings_state_word(&m, 7u) == 0x1FBFFFu, "state word: every field at its maximum packs into 0x1FBFFF, no overlap");
+    settings_of(&m, 0u, 0u, 0u, 0u, 0u);
+    m.voice_lead = 3u;
+    check(settings_state_word(&m, 0u) == 0x30000u, "state word: voice_lead 3 alone sits in bits 16-17");
+    settings_of(&m, 0u, 0u, 0u, 0u, 0u);
+    m.mood = 7u;
+    check(settings_state_word(&m, 0u) == 0x1C0000u, "state word: mood 7 alone sits in bits 18-20");
     settings_of(&m, 0u, 3u, 0u, 0u, 0u);
     check(settings_state_word(&m, 0u) == 0x3u, "state word: density 3 alone sits in bits 0-1");
     settings_of(&m, 0u, 0u, 3u, 0u, 0u);
@@ -221,9 +273,11 @@ static void settings_tests(void)
     settings_of(&b, 1u, 0u, 1u, 12u, 1u);  if (settings_state_word(&b, 0u) == base) all_differ = 0;
     settings_of(&b, 1u, 0u, 0u, 13u, 1u);  if (settings_state_word(&b, 0u) == base) all_differ = 0;
     settings_of(&b, 1u, 0u, 0u, 12u, 0u);  if (settings_state_word(&b, 0u) == base) all_differ = 0;
+    settings_of(&b, 1u, 0u, 0u, 12u, 1u);  b.voice_lead = 1u;  if (settings_state_word(&b, 0u) == base) all_differ = 0;
+    settings_of(&b, 1u, 0u, 0u, 12u, 1u);  b.mood = 1u;  if (settings_state_word(&b, 0u) == base) all_differ = 0;
     w = settings_state_word(&d, 1u);
     if (w == base) all_differ = 0;
-    check(all_differ, "state word: a step in any one setting, or a new chord, changes the word");
+    check(all_differ, "state word: a step in any one setting (voice_lead and mood included), or a new chord, changes the word");
 }
 
 int main(void)
@@ -245,7 +299,7 @@ int main(void)
                 for (de = 0; de < 4u; de++) {
                     run_t c;
                     c.seed = SEEDS[si]; c.scale = sc; c.density = de; c.drift = dr;
-                    c.start = 0u; c.ticks = SIM_TICKS; c.pause_k = 0u; c.resume_k = 0u; c.mute_k = 0u; c.log_on = 0u;
+                    c.start = 0u; c.ticks = SIM_TICKS; c.pause_k = 0u; c.resume_k = 0u; c.mute_k = 0u; c.log_on = 0u; c.lead = 0u;
                     sim_run(&s, &c);
                     runs++;
                     notes_by_density[de] += s.st.notes;
@@ -266,6 +320,39 @@ int main(void)
     check(double_on == 0u && orphan_off == 0u, "every note-off follows its voice's note-on; no voice starts while it sounds");
     check(max_ons <= ENGINE_VOICES && too_many == 0u, "a call starts at most one note per colour voice, and fits its event array");
 
+    /* voice leading: the same matrix at every lead (ENC_KNOB3). The rules above must hold at each, and the notes a chord
+       move keeps from the chord before (counted with the literal templates above) must rise at every step */
+    {
+        static const uint32_t LEADS = 4u;
+        uint64_t moves[4] = { 0u, 0u, 0u, 0u }, shared[4] = { 0u, 0u, 0u, 0u };
+        uint32_t lead, l_bad = 0u;
+        double mean[4];
+        for (lead = 0; lead < LEADS; lead++)
+            for (si = 0; si < 4u; si++)
+                for (sc = 0; sc < 6u; sc++)
+                    for (dr = 0; dr < 4u; dr++)
+                        for (de = 0; de < 4u; de++) {
+                            run_t c;
+                            c.seed = SEEDS[si]; c.scale = sc; c.density = de; c.drift = dr; c.lead = lead;
+                            c.start = 0u; c.ticks = SIM_TICKS; c.pause_k = 0u; c.resume_k = 0u; c.mute_k = 0u; c.log_on = 0u;
+                            sim_run(&s, &c);
+                            moves[lead] += s.st.moves;
+                            shared[lead] += s.st.shared_sum;
+                            l_bad += s.st.bad_scale + s.st.bad_register + s.st.bad_drone + s.st.bad_quiet + s.st.double_on +
+                                     s.st.orphan_off + (s.st.max_ons > ENGINE_VOICES) + s.st.too_many;
+                        }
+        printf("engine: notes a chord move keeps from the chord before, per lead (%llu moves at lead 3):\n", (unsigned long long)moves[3]);
+        for (lead = 0; lead < LEADS; lead++) {
+            mean[lead] = (double)shared[lead] / (double)moves[lead];
+            printf("engine:   lead %u: %.3f of 3 notes kept per move (%llu moves)\n", lead, mean[lead], (unsigned long long)moves[lead]);
+        }
+        check(l_bad == 0u, "voice leading: at every lead 0-3, notes in scale and register, quiet before a note, no stray offs");
+        check(moves[0] > 1000u && moves[3] > 1000u, "voice leading: every lead sees a large number of chord moves");
+        /* measured: +0.31, +0.20 and +0.10 per step. 0.08 is a clear step, not noise (the run is deterministic) */
+        check(mean[1] - mean[0] >= 0.08 && mean[2] - mean[1] >= 0.08 && mean[3] - mean[2] >= 0.08,
+              "voice leading: the notes kept per move rise by at least 0.08 at every lead step");
+    }
+
     /* the note rate: notes per minute per density, over the whole matrix, with the simple envelope model */
     minutes_per_density = (runs / 4u) * (SIM_MS / 60000u);     /* 96 runs of 180 minutes each */
     printf("engine: notes per minute, %u runs per density of 3 simulated hours each:\n", runs / 4u);
@@ -285,7 +372,7 @@ int main(void)
     {
         run_t c;
         c.seed = 7u; c.scale = 1u; c.density = 3u; c.drift = 1u; c.start = 0u; c.ticks = 4000u;
-        c.pause_k = 1200u; c.resume_k = 1400u; c.mute_k = 0u; c.log_on = 0u;
+        c.pause_k = 1200u; c.resume_k = 1400u; c.mute_k = 0u; c.log_on = 0u; c.lead = 0u;
         sim_run(&s, &c);
         check(s.st.paused_events == 0u, "pause: no event at all while paused (10 s, density 3)");
         check(s.st.orphan_off == 0u && s.st.double_on == 0u, "pause: no note-off follows the pause for a note it cut");
@@ -295,7 +382,7 @@ int main(void)
         for (i = 0; i < 4u; i++) {
             run_t c;
             c.seed = SEEDS[i]; c.scale = 0u; c.density = 3u; c.drift = 2u; c.start = 0u; c.ticks = 2400u;
-            c.pause_k = 1200u; c.resume_k = 1300u; c.mute_k = 0u; c.log_on = 0u;
+            c.pause_k = 1200u; c.resume_k = 1300u; c.mute_k = 0u; c.log_on = 0u; c.lead = 0u;
             sim_run(&s, &c);
             held_total += s.st.held_at_pause;
             if (s.st.orphan_off || s.st.double_on || s.st.paused_events) ok = 0;
@@ -309,7 +396,7 @@ int main(void)
         run_t c;
         uint32_t i, mismatch = 0u;
         c.seed = 99u; c.scale = 2u; c.density = 3u; c.drift = 1u; c.start = 0u; c.ticks = 6000u;
-        c.pause_k = 0u; c.resume_k = 0u; c.mute_k = 0u; c.log_on = 1u;
+        c.pause_k = 0u; c.resume_k = 0u; c.mute_k = 0u; c.log_on = 1u; c.lead = 0u;
         sim_run(&a, &c);
         c.pause_k = 10u; c.resume_k = 210u;
         c.ticks = 6000u + 200u;                  /* the pause is 200 ticks: B must run that much longer to cover A's end */
@@ -354,7 +441,7 @@ int main(void)
                 run_t c;
                 uint32_t j, resume_t = 1210u * TICK_MS, first = 0xFFFFFFFFu;
                 c.seed = SEEDS[i]; c.scale = 1u; c.density = dd; c.drift = 1u; c.start = 0u; c.ticks = 2400u;
-                c.pause_k = 1200u; c.resume_k = 1210u; c.mute_k = 1200u; c.log_on = 1u;
+                c.pause_k = 1200u; c.resume_k = 1210u; c.mute_k = 1200u; c.log_on = 1u; c.lead = 0u;
                 sim_run(&s, &c);
                 if (s.st.triple_ticks) ok = 0;
                 for (j = 0; j < s.log_n; j++)
@@ -373,7 +460,7 @@ int main(void)
         run_t c;
         uint32_t i, same = 1u;
         c.seed = 1234u; c.scale = 4u; c.density = 2u; c.drift = 3u; c.ticks = 12000u;
-        c.pause_k = 3000u; c.resume_k = 3200u; c.mute_k = 0u; c.log_on = 1u;
+        c.pause_k = 3000u; c.resume_k = 3200u; c.mute_k = 0u; c.log_on = 1u; c.lead = 0u;
         c.start = 0u;
         sim_run(&a, &c);
         c.start = 0xFFFFFFFFu - 20000u;         /* the counter wraps 20 s into the run */

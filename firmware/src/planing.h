@@ -132,6 +132,45 @@ static uint32_t pick_chord(uint32_t scale, int32_t degree, uint32_t *rng)
     return 0u;
 }
 
+/* voice leading: how many of the new chord's three voices land on a pitch class the outgoing chord has (0..3). Each chord
+   is a root, in semitones from the scale's root (any sign), and a template. A template's voices are all different pitch
+   classes, so this is the same whichever chord is called the outgoing one. */
+static uint32_t chord_shared_pitches(int32_t root_old, uint32_t templ_old, int32_t root_new, uint32_t templ_new)
+{
+    uint32_t a, b, n = 0;
+    for (b = 0; b < 3u; b++) {
+        int32_t pc = pitch_class(root_new + chord_voice_semitone(templ_new, b));
+        for (a = 0; a < 3u; a++)
+            if (pitch_class(root_old + chord_voice_semitone(templ_old, a)) == pc) { n++; break; }
+    }
+    return n;
+}
+
+/* ENC_KNOB3's voice leading, lead 0..3: a pick among the templates that fit this degree, weighted towards the ones that
+   keep notes of the outgoing chord. A template that shares n notes weighs 2^(lead * n), so each lead step is a clear
+   step: with 3 candidates sharing 2, 3 and 1 notes the mean shared notes is 2.00, 2.43, 2.71 and 2.86 at leads 0 to 3.
+   Lead 0 is pick_chord exactly: the same pick, the same random draw. At most 2^9 per template, 8 templates, so the total
+   stays under 2^12. A degree with one fitting template has no choice, at any lead. */
+static uint32_t pick_chord_led(uint32_t scale, int32_t degree, uint32_t *rng, int32_t root_old, uint32_t templ_old,
+                               uint32_t lead)
+{
+    uint32_t t, total = 0, pick;
+    int32_t root_new = scale_degree_to_semitone(scale, degree);
+    if (lead == 0u) return pick_chord(scale, degree, rng);
+    for (t = 0; t < CHORD_TEMPLATE_COUNT; t++)
+        if (chord_fits(scale, degree, t))
+            total += 1u << (lead * chord_shared_pitches(root_old, templ_old, root_new, t));
+    pick = rng_next(rng) % total;
+    for (t = 0; t < CHORD_TEMPLATE_COUNT; t++) {
+        uint32_t w;
+        if (!chord_fits(scale, degree, t)) continue;
+        w = 1u << (lead * chord_shared_pitches(root_old, templ_old, root_new, t));
+        if (pick < w) return t;
+        pick -= w;
+    }
+    return 0u;
+}
+
 /* drift_rate: 0..3 (ENC_KNOB1, ROADMAP.md), bigger = a wider step each time. Design choice, not spelled out in
    ROADMAP.md: drift_rate sizes the step here; "density" (how OFTEN this gets called) is Seam D's job, not this
    function's -- it only decides HOW FAR, given that it is being called at all. Returns the new degree. */

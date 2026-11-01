@@ -220,6 +220,119 @@ int main(void)
     check(clamp_register(SCALE_DORIAN, 3, -12, 12) == 3, "Dorian degree 3 (+5 st) is inside -12..+12, unchanged");
     check(clamp_register(SCALE_PENTATONIC, 0, -12, 12) == 0, "degree 0 is its own register (the root)");
 
+    /* voice leading: chord_shared_pitches counts the new chord's voices that land on a pitch class the outgoing chord has.
+       Worked by hand, as pitch classes: sus4 on semitone 7 is {0, 2, 7}; sus2 on 0 is {0, 2, 7}; add9 on 0 is {2, 4, 7};
+       6/9 on 0 is {2, 4, 9}; quartal on 0 is {3, 5, 10}; maj7 on 0 is {4, 7, 11}. */
+    check(chord_shared_pitches(7, CHORD_SUS4, 0, CHORD_SUS2) == 3, "shared pitches: sus4 on 7 and sus2 on 0 are the same three notes, 3");
+    check(chord_shared_pitches(7, CHORD_SUS4, 0, CHORD_ADD9) == 2, "shared pitches: sus4 on 7 and add9 on 0 share 2 and 7, so 2");
+    check(chord_shared_pitches(7, CHORD_SUS4, 0, CHORD_SIX9) == 1, "shared pitches: sus4 on 7 and 6/9 on 0 share only 2, so 1");
+    check(chord_shared_pitches(0, CHORD_QUARTAL, 0, CHORD_MAJ7) == 0, "shared pitches: quartal and maj7 on the same root share nothing, 0");
+    check(chord_shared_pitches(-5, CHORD_SUS4, 0, CHORD_SUS2) == 3, "shared pitches: a root 5 below 0 is the same pitch classes as 7");
+    check(chord_shared_pitches(19, CHORD_SUS4, 0, CHORD_SUS2) == 3, "shared pitches: a root an octave and a bit above is the same pitch classes too");
+    {
+        uint32_t a, b, bad = 0;
+        int32_t ra, rb;
+        for (a = 0; a < CHORD_TEMPLATE_COUNT; a++)
+            for (b = 0; b < CHORD_TEMPLATE_COUNT; b++)
+                for (ra = -12; ra <= 19; ra += 3)
+                    for (rb = -12; rb <= 19; rb += 5) {
+                        int32_t n = chord_shared_pitches(ra, a, rb, b);
+                        if (n < 0 || n > 3 || n != chord_shared_pitches(rb, b, ra, a)) bad = 1;
+                    }
+        check(!bad, "shared pitches is 0..3 and the same whichever chord is called the outgoing one, for every template pair");
+        check(chord_shared_pitches(4, CHORD_AUG9, 4, CHORD_AUG9) == 3, "shared pitches: a chord shares all 3 notes with itself");
+    }
+
+    /* pick_chord_led at lead 0 is exactly pick_chord: the same pick and the same random state, so the sound at lead 0
+       is the sound before voice leading existed */
+    {
+        uint32_t sc, k, bad = 0, ra = 77u, rb = 77u;
+        int32_t d;
+        for (sc = 0; sc < SCALE_COUNT; sc++)
+            for (d = -6; d <= 6; d++)
+                for (k = 0; k < 200u; k++) {
+                    uint32_t x = pick_chord(sc, d, &ra);
+                    uint32_t y = pick_chord_led(sc, d, &rb, (int32_t)(k % 12u), k % CHORD_TEMPLATE_COUNT, 0u);
+                    if (x != y || ra != rb) bad = 1;
+                }
+        check(!bad, "pick_chord_led at lead 0 returns pick_chord's pick and leaves the same random state, whatever the old chord");
+    }
+
+    /* at every lead, only a template that fits the degree is ever returned */
+    {
+        uint32_t sc, lead, k, bad = 0, rng = 5u;
+        int32_t d;
+        for (lead = 0; lead <= 3u; lead++)
+            for (sc = 0; sc < SCALE_COUNT; sc++)
+                for (d = -12; d <= 12; d++)
+                    for (k = 0; k < 40u; k++) {
+                        uint32_t t = pick_chord_led(sc, d, &rng, (int32_t)(k % 19u) - 7, k % CHORD_TEMPLATE_COUNT, lead);
+                        if (t >= CHORD_TEMPLATE_COUNT || !chord_fits(sc, d, t)) bad = 1;
+                    }
+        check(!bad, "pick_chord_led returns only a fitting template, at every lead, scale and degree from -12 to +12");
+    }
+    {
+        uint32_t rng = 3u, i, other = 0;
+        for (i = 0; i < 500u; i++)
+            if (pick_chord_led(SCALE_PENTATONIC, 2, &rng, 0, CHORD_MAJ7, 3u) != CHORD_QUARTAL) other = 1;
+        check(!other, "pick_chord_led at a single-option degree still returns that option at lead 3");
+    }
+
+    /* the worked example: pentatonic, new root at degree 0 (semitone 0), outgoing sus4 on 7. Three chords fit: add9 shares
+       2 notes, sus2 shares 3, 6/9 shares 1. Weights 2^(lead * shared), so the chances (worked separately) are
+       lead 0: 1/3 each; lead 1: 4/14, 8/14, 2/14; lead 2: 16/84, 64/84, 4/84; lead 3: 64/584, 512/584, 8/584 */
+    {
+        static const double WANT[4][3] = {
+            { 0.3333, 0.3333, 0.3333 }, { 0.2857, 0.5714, 0.1429 }, { 0.1905, 0.7619, 0.0476 }, { 0.1096, 0.8767, 0.0137 } };
+        uint32_t lead, i, rng = 12345u, all_close = 1u;
+        for (lead = 0; lead <= 3u; lead++) {
+            uint32_t cnt[3] = { 0u, 0u, 0u };
+            double got[3];
+            for (i = 0; i < 100000u; i++) {
+                uint32_t t = pick_chord_led(SCALE_PENTATONIC, 0, &rng, 7, CHORD_SUS4, lead);
+                if (t == CHORD_ADD9) cnt[0]++;
+                else if (t == CHORD_SUS2) cnt[1]++;
+                else if (t == CHORD_SIX9) cnt[2]++;
+            }
+            for (i = 0; i < 3u; i++) {
+                double diff;
+                got[i] = cnt[i] / 100000.0;
+                diff = got[i] - WANT[lead][i];
+                if (diff > 0.01 || diff < -0.01) all_close = 0;
+            }
+            printf("planing:   lead %u: add9 %.4f, sus2 %.4f, 6/9 %.4f (want %.4f, %.4f, %.4f)\n", lead, got[0], got[1], got[2],
+                   WANT[lead][0], WANT[lead][1], WANT[lead][2]);
+        }
+        check(all_close, "pick_chord_led's chances in the worked example are within 0.01 of the hand-worked figures, at all four leads");
+    }
+
+    /* the effect of each step, over every scale, a spread of degrees, and every old template at a spread of roots. Most
+       degrees offer only 2-3 fitting templates and the old chord here is arbitrary, so the best available choice often
+       keeps little and the means are low (measured 0.78, 0.92, 1.02, 1.08: steps of 0.14, 0.10 and 0.06). The engine
+       test measures the same thing on real chord moves. Each step must still clear 0.05. */
+    {
+        double mean[4];
+        uint32_t lead, sc, k, t_old, rng = 99u;
+        int32_t d, r_old;
+        for (lead = 0; lead <= 3u; lead++) {
+            double sum = 0.0;
+            uint32_t n = 0u;
+            for (sc = 0; sc < SCALE_COUNT; sc++)
+                for (d = -5; d <= 5; d++)
+                    for (t_old = 0; t_old < CHORD_TEMPLATE_COUNT; t_old++)
+                        for (r_old = 0; r_old < 12; r_old += 2)
+                            for (k = 0; k < 20u; k++) {
+                                uint32_t t = pick_chord_led(sc, d, &rng, r_old, t_old, lead);
+                                sum += chord_shared_pitches(r_old, t_old, scale_degree_to_semitone(sc, d), t);
+                                n++;
+                            }
+            mean[lead] = sum / n;
+        }
+        printf("planing:   mean shared notes per lead: %.3f, %.3f, %.3f, %.3f\n", mean[0], mean[1], mean[2], mean[3]);
+        check(mean[1] - mean[0] >= 0.05 && mean[2] - mean[1] >= 0.05 && mean[3] - mean[2] >= 0.05,
+              "voice leading: the mean shared notes rises by at least 0.05 at every lead step");
+    }
+
     printf("planing: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }

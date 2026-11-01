@@ -42,6 +42,21 @@ int main(void)
     check(!long_line, "every knob line (drift x colour) is at most 29 characters");
     check(worst_knobs == 18u, "the longest knob line is 18 characters (DRIFT 3  COLOUR 31)");
 
+    /* every voice-leading value fits on the bottom row */
+    {
+        uint32_t lead, worst_bottom = 0;
+        long_line = 0;
+        for (lead = 0; lead < 4u; lead++) {
+            uint32_t n;
+            status_bottom(s, lead);
+            n = (uint32_t)strlen(s);
+            if (n > worst_bottom) worst_bottom = n;
+            if (n > LINE_MAX) long_line = 1;
+        }
+        check(!long_line, "every bottom line (voice leading 0-3) is at most 29 characters");
+        check(worst_bottom == 17u, "the longest bottom line is 17 characters (VOICE 3  SLEEP --)");
+    }
+
     /* literal strings: the text the screen shows, unchanged from before the overflow fix */
     status_top(s, 1u, 1u, 0u);
     check(strcmp(s, "PENTATONIC  DRONE ON  D0") == 0, "top: PENTATONIC, drone on, density 0 reads PENTATONIC  DRONE ON  D0");
@@ -57,6 +72,11 @@ int main(void)
     check(strcmp(s, "DRIFT 3  COLOUR 31") == 0, "knobs: DRIFT 3  COLOUR 31 (two-digit colour at its top)");
     status_knobs(s, 2u, 0u);
     check(strcmp(s, "DRIFT 2  COLOUR 0") == 0, "knobs: colour 0 is one digit");
+
+    status_bottom(s, 0u);
+    check(strcmp(s, "VOICE 0  SLEEP --") == 0, "bottom: voice leading 0 reads VOICE 0  SLEEP --");
+    status_bottom(s, 3u);
+    check(strcmp(s, "VOICE 3  SLEEP --") == 0, "bottom: voice leading 3 reads VOICE 3  SLEEP --");
 
     printf("status: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;

@@ -7,13 +7,15 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 ## Where it stands
 
 - **Working on real hardware:** the audio engine is flashed to an FM-1 from CI-built `.fwsc` packages and confirmed by ear.
-- **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, the soft-focus LFO, the
-  rebalanced spectrum and the pond screen.
-  The colour-note envelope, harmonics, stereo, drone level and reverb tail have only been heard in the emulator.
+- **Heard on the FM-1:** the soft-focus LFO and the rebalanced spectrum, on build `f28612a`. The verdict was "sounding
+  fine", so there's no detail on depth, drone level or brightness.
+- **Not yet heard or seen on hardware:** each of the six scales and eight chords, the new note holds and the pond screen.
+  The colour-note envelope, stereo and reverb tail have only been heard in the emulator, and the drone level only in the
+  emulator and in the build before the rebalance.
 - **Biggest gap in the sound:** none on the host numbers, which are at or near every target
   ([Measurements](#measurements)). Whether it sounds right is unheard: the rebalanced spectrum is about 4.5 dB quieter
   overall and brighter, and the drone is much further back.
-- **Biggest gap in the panel:** `ENC_KNOB3`, `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
+- **Biggest gap in the panel:** `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
 - **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, before the soft-focus LFO and one more
   `sine()` per sample per voice. It needs re-measuring on the FM-1.
 
@@ -22,16 +24,16 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 The order follows dependencies first, then impact. Sound comes before moods because the moods are tuned by ear against
 it. Anything that adds a saved setting comes before moods because moods store those settings.
 
-| #   | Item                                                        | Impact | Size   | Audio ISR | Why it's here                                                          |
-| --- | ----------------------------------------------------------- | ------ | ------ | --------- | ---------------------------------------------------------------------- |
-| 1   | [Re-baseline](#1-re-baseline)                               | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
-| 2   | [Soft-focus LFO](#2-soft-focus-lfo) (host done, unheard)    | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
-| 3   | [Spectral balancing](#3-spectral-balancing) (host done)     | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
-| 4   | [Voice leading and settings](#4-voice-leading-and-settings) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
-| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)               | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
-| 6   | [Sleep timer](#6-sleep-timer)                               | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
-| 7   | [Key sets the drone root](#7-key-sets-the-drone-root)       | Medium | Small  | No        | First use of the keybed; completes the panel                           |
-| 8   | [Hub submission](#8-hub-submission)                         | High   | Medium | No        | Reaches listeners; the controls and sound should be final first        |
+| #   | Item                                                                    | Impact | Size   | Audio ISR | Why it's here                                                          |
+| --- | ----------------------------------------------------------------------- | ------ | ------ | --------- | ---------------------------------------------------------------------- |
+| 1   | [Re-baseline](#1-re-baseline)                                           | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
+| 2   | [Soft-focus LFO](#2-soft-focus-lfo) (done)                              | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
+| 3   | [Spectral balancing](#3-spectral-balancing) (done)                      | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
+| 4   | [Voice leading and settings](#4-voice-leading-and-settings) (host done) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
+| 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)                           | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
+| 6   | [Sleep timer](#6-sleep-timer)                                           | Medium | Small  | No        | Independent and cheap; fits "sits on a shelf and drifts"               |
+| 7   | [Key sets the drone root](#7-key-sets-the-drone-root)                   | Medium | Small  | No        | First use of the keybed; completes the panel                           |
+| 8   | [Hub submission](#8-hub-submission)                                     | High   | Medium | No        | Reaches listeners; the controls and sound should be final first        |
 
 After the Hub, in rough priority:
 
@@ -60,7 +62,8 @@ After the Hub, in rough priority:
 
 ### 2. Soft-focus LFO
 
-The mission's slow drift as something the instrument does on its own. Done and tested on the host; not heard on the FM-1.
+The mission's slow drift as something the instrument does on its own. Done: tested on the host, and heard on the FM-1 in
+build `f28612a` ("sounding fine"). The depths are still starting guesses, and the ISR isn't re-timed.
 
 - **Amplitude, per voice:** each voice's drift LFO (`lfo_ph`, 0.07-0.27 Hz), read a quarter cycle late so level and pitch
   don't move together, scales that block's level (`amp_swell()`, `synth.h`). A note only dips, by up to 12 dB
@@ -76,7 +79,8 @@ The mission's slow drift as something the instrument does on its own. Done and t
 
 ### 3. Spectral balancing
 
-Done and tested on the host; not heard on the FM-1, and the ISR isn't re-timed. The ear is the final judge.
+Done: tested on the host, and heard on the FM-1 in build `f28612a` ("sounding fine"). The ISR isn't re-timed. The ear is
+the final judge.
 
 Where the problem was: with the drone off, the 20-100 Hz band falls from -3.5 dB to -66 dB, so the drone held nearly all
 the low-end power. And a centroid of about 250 Hz held whatever the main partial did, because the detuned partial was a
@@ -97,19 +101,34 @@ pure fundamental at full level.
   gain, since the peak has about 10 dB of headroom.
 - **Brighter when open:** at colour 31 the 1.6-3.2 kHz band is -17.6 dB in the worst-case render, above the target range.
   At the default colour 12 it's -30 dB.
-- **Not tuned by ear:** the targets are approximate (see [Measurements](#measurements)) and every number above is a
-  starting guess. The drone's level in particular is a judgement: at 1200 the band is -16.0 dB, inside the target.
+- **Only roughly tuned by ear:** the targets are approximate (see [Measurements](#measurements)), and "sounding fine" is
+  the only listening verdict so far. The drone's level in particular is a judgement: at 1200 the band is -16.0 dB, inside the target.
 
 ### 4. Voice leading and settings
 
-**`ENC_KNOB3`, voice leading, 0-3:** weights `pick_chord()` (`planing.h`) towards templates that share pitches with the
-outgoing chord. At 0 it stays the uniform pick it is today. At 3 it favours the most shared pitches. It still picks only
-from templates that fit the degree, so whole-tone has just 2 to choose from. Main-loop logic, tested in
-`tests/planing_test.c`. The status row already has a `VOICE --` slot.
+Done and tested on the host; not heard on the FM-1.
 
-**Saved settings:** append `voice_lead` and `mood` to `settings_t`, and extend `settings_valid()`. A changed size reads as
-"nothing saved", so everyone's settings reset to defaults once. That's cheap now and costs real users after the Hub, so
-make all the layout changes in this one step.
+**`ENC_KNOB3`, voice leading, 0-3:** each chord move (a re-plane or a re-root) picks among the templates that fit the new
+degree, weighted towards the ones that keep notes of the chord it's leaving (`pick_chord_led()`, `planing.h`). A template
+that shares `n` notes weighs `2^(lead * n)`, so each step is a clear step. It still picks only from templates that fit,
+so whole-tone has just 2 to choose from, and a degree with one fitting template has no choice at any lead.
+
+- **Lead 0 is the old uniform pick,** with the same random draw. The 3-minute render at lead 0 is byte-identical to the one
+  before this change. It's also the default.
+- **Measured on real chord moves** (`tests/engine_test.c`: 4 seeds x 6 scales x 4 drifts x 4 densities x 3 simulated
+  hours, about 870 000 moves per lead, notes counted with a literal chord table): the chord keeps 1.79, 2.10, 2.30 and
+  2.40 of its 3 notes per move at leads 0 to 3. The steps are +0.31, +0.20 and +0.10, so the last detent is the faintest.
+- **Why not higher:** most degrees offer only 2-3 fitting templates, so the best available choice often keeps little, and
+  the mean can't approach 3.
+- **No timing change:** a weighted pick uses one random draw, like the uniform pick, so the lead doesn't move any timer.
+  Every lead makes the same number of chord moves.
+- **Boot and scale changes use lead 0:** every voice starts afresh there, so there's no old chord to keep.
+- **Screen:** `VOICE n` on the bottom row (`status_bottom()`, `status.h`).
+
+**Saved settings:** `voice_lead` and `mood` are appended to `settings_t`, which is now 7 bytes, and `settings_valid()` checks
+both. A changed size reads as "nothing saved", so the first boot after flashing this build loads the defaults. That's cheap
+now and costs real users after the Hub, so make any further layout changes before then. `mood` is stored and checked but
+nothing sets it yet: item 5 does.
 
 ### 5. Moods and `BTN_SAVE`
 
@@ -207,6 +226,8 @@ the saved settings.
 | D2      | 3-7 s                    | 2-5 s     |
 | D3      | 1.2-3.5 s                | 1.2-3 s   |
 
+- **Voice leading:** `ENC_KNOB3` weights each chord move towards chords that keep notes of the one before
+  ([item 4](#4-voice-leading-and-settings)). Lead 0 is the uniform pick.
 - **Pause:** no events are sent. A held note is cut, and a scale change during a pause is applied on resume. Resume picks
   the timers up where they stopped, and a voice with no wait left gets a new random one, so they don't all enter at once.
 - **Seed:** mixes boot time and two ADC reads, so each power-on differs (confirmed on the FM-1). The engine's position
@@ -230,15 +251,16 @@ the saved settings.
 | `ENC_ALGORITHM`      | density, 0-3                                                      |
 | `ENC_KNOB1`          | drift: how far each chord move or re-root steps, 0-3              |
 | `ENC_KNOB2`          | colour: the low-pass on the final mix, 0 darkest to 31 fully open |
+| `ENC_KNOB3`          | voice leading: how much a chord move keeps the old chord's notes  |
 | `BTN_ARP`            | drone on/off, LED lit when on                                     |
 | `BTN_PLAY`           | pause/resume: 45 ms fade, timers frozen. LED lit while generating |
 | MASTER               | volume                                                            |
 | The other 12 buttons | soft backlight only                                               |
 
-**Status rows:** `PENTATONIC  DRONE ON  D0`, then `DRIFT 0  COLOUR 12`, then `VOICE --  SLEEP --` until items 4 and 6 fill
-those in. The dev overlays `ISR_TIMING` and `SEED_SHOW` share the bottom row, so enable only one at a time.
+**Status rows:** `PENTATONIC  DRONE ON  D0`, then `DRIFT 0  COLOUR 12`, then `VOICE 0  SLEEP --`, where the sleep slot stays `--` until
+item 6 fills it in. The dev overlays `ISR_TIMING` and `SEED_SHOW` share the bottom row, so enable only one at a time.
 
-**Saving:** the five settings persist across power-off (`settings_save`). A save waits for 2 s after the last change while
+**Saving:** the seven settings persist across power-off (`settings_save`). A save waits for 2 s after the last change while
 paused, or 30 s while playing, because the flash erase interrupts the sound.
 
 ### Screen

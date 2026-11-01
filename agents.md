@@ -137,7 +137,7 @@ firmware/src/impressionism.c  # application layer: the sound (audio ISR), input 
 firmware/src/platform.c       # infra: boot, USB, MIDI, update loader, audio ISR — don't touch casually
 firmware/src/planing.h        # pure logic: scales, chord templates, the planing picker, note scheduler
 firmware/src/engine.h         # pure engine: what plays and when (drone, chord, timers, held notes, pause/resume) as events
-firmware/src/settings.h       # pure: the five saved settings (same bytes in flash), defaults, range checks, the screen's state word
+firmware/src/settings.h       # pure: the seven saved settings (same bytes in flash), defaults, range checks, the screen's state word
 firmware/src/synth.h          # pure synthesis helpers: sine, phase steps, note_to_inc, pitch_drift
 firmware/src/status.h         # pure: the status-text lines under the pond
 firmware/src/envelope.h       # per-note attack/release envelope (colour voices), testable on the host

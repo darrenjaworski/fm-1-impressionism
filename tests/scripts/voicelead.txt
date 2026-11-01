@@ -1,0 +1,9 @@
+# ENC_KNOB3 (encoder 4 on the host) is the voice leading: three detents up from 0 to 3 at 0.5 s, then 3 minutes of colour
+# notes, with a screen at 1 s to read VOICE 3, and one after turning it back down at 2 s. tests/wav_check.py checks the
+# render for clipping and silence.
+500 enc 4 3
+1000 shot
+1500 enc 4 -3
+2000 shot
+2500 enc 4 3
+180000 end
