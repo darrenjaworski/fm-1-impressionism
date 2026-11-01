@@ -145,7 +145,7 @@ firmware/src/reverb.h         # Schroeder reverb: 4 parallel combs + 2 series fe
 firmware/src/store.h          # per-board flash storage layout (settings/blobs/slots); STORE_MAGIC/DATA_FAMILY here
 firmware/hal/                 # hardware abstraction layer — the only place allowed to touch raw registers
 tools/                        # build.py (device build), fm1_install.py (USB installer), fm1pkg_make.py, lz4blk.py,
-                               # version_timestamp.py (release tags)
+                               # version_timestamp.py (release tags), measure_render.py (ROADMAP's measurements; needs numpy)
 site/                         # this project's own GitHub Pages content (firmwares.json), see .github/workflows/pages.yml
 tests/run_host.sh             # host-mode test: compiles with the system cc, renders to WAV + screen PNGs
 tests/run_tests.sh            # full test suite; needs a completed ./build.sh first

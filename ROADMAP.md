@@ -9,7 +9,7 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 - **Working on real hardware:** the audio engine is flashed to an FM-1 from CI-built `.fwsc` packages and confirmed by ear.
 - **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, and the pond screen.
   The colour-note envelope, harmonics, stereo, drone level and reverb tail have only been heard in the emulator.
-- **Biggest gap in the sound:** the envelope range and spectral centroid are well short of the reference
+- **Biggest gap in the sound:** the envelope range (11.0 dB) and spectral centroid (169 Hz) are short of the reference
   ([Measurements](#measurements)).
 - **Biggest gap in the panel:** `ENC_KNOB3`, `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
 - **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, so there's room for what's planned.
@@ -45,11 +45,15 @@ After the Hub, in rough priority:
 
 ### 1. Re-baseline
 
-- Re-render the [measurements](#measurements). The "Now" column predates the register limits and the drift fix.
-- Re-measure the ISR with `ISR_TIMING=1`, since the last figure also predates the drift fix.
-- On the FM-1, check by ear: the six scales and eight chords, the new holds, the colour-note envelope, harmonics, stereo,
-  drone level and reverb tail. Check by eye: the pond.
-- Decide whether the small D2 to D3 step in [note rate](#measurements) needs fixing.
+- **Done (host):** the [measurements](#measurements) are re-rendered with a script that has a self-test, and the note
+  rates are re-run (unchanged).
+- **To do, on the FM-1:** re-measure the ISR with `ISR_TIMING=1`, since the 1.3 ms figure predates the drift fix. Check by
+  ear: the six scales and eight chords, the new holds, the colour-note envelope, harmonics, stereo, drone level and reverb
+  tail. Check by eye: the pond.
+- **To do:** measure the reference recording with `tools/measure_render.py`, so the targets use the same definitions.
+- **Decide:** whether the D2 to D3 step in [note rate](#measurements) needs fixing. It's 19% (18.6 to 22.1 notes per
+  minute), but density also halves the chord-move time at D3 (3-7 s to 1.2-3.5 s). Leave it unless it's hard to hear on the
+  FM-1.
 
 ### 2. Soft-focus LFO
 
@@ -236,17 +240,26 @@ this firmware needs no web port. `.github/workflows/pages.yml` builds it at the 
 
 ## Measurements
 
-**Against the reference.** Host renders, 3 minutes at default settings, first 15 s skipped. The targets come from the
-reference recording, a Debussy "Reverie" on a modular synth. The ear is the final judge; these numbers guide the work.
+**Against the reference.** Host renders of `tests/scripts/long.txt` (3 minutes at default settings), measured with
+`tools/measure_render.py`, which skips the first 15 s and has a `--selftest` against signals with known answers. The
+targets come from the reference recording, a Debussy "Reverie" on a modular synth. The ear is the final judge; these
+numbers guide the work.
 
-| Metric                           | Before | Now    | Target        |
-| -------------------------------- | ------ | ------ | ------------- |
-| Envelope range p95-p10 (1 s RMS) | 2.9 dB | 7.7 dB | 15+ dB        |
-| Spectral centroid                | 143 Hz | 236 Hz | 350-500 Hz    |
-| 20-100 Hz band                   | -5 dB  | -8 dB  | -15 to -25 dB |
-| 1.6-3.2 kHz band                 | -73 dB | -38 dB | -25 to -35 dB |
-| L/R correlation                  | 0.58   | 0.51   | 0.3-0.5       |
-| Clipped samples                  | 802    | 0      | 0             |
+| Metric                           | `5beb646` | Now (`e4762d8`) | Target        |
+| -------------------------------- | --------- | --------------- | ------------- |
+| Envelope range p95-p10 (1 s RMS) | 11.4 dB   | 11.0 dB         | 15+ dB        |
+| Spectral centroid                | 193 Hz    | 169 Hz          | 350-500 Hz    |
+| 20-100 Hz band                   | -3.6 dB   | -3.5 dB         | -15 to -25 dB |
+| 1.6-3.2 kHz band                 | -39 dB    | -44 dB          | -25 to -35 dB |
+| L/R correlation                  | 0.51      | 0.49            | 0.3-0.5       |
+| Clipped samples                  | 0         | 0               | 0             |
+
+`5beb646` is the commit the earlier table was taken on, re-measured with this script. The earlier figures for envelope
+range (7.7 dB), centroid (236 Hz) and the 20-100 Hz band (-8 dB) couldn't be reproduced from that commit, so they came
+from different definitions and aren't comparable. How the Target column was measured isn't recorded, so treat its
+envelope, centroid and band targets as approximate until the reference is measured with this script. Bands are dB below
+the total power. Since `5beb646` the centroid fell 24 Hz and the 1.6-3.2 kHz band fell 5 dB, which fits the
+register limits holding notes lower.
 
 **Note rate.** `tests/engine_test.c`, host only: 4 seeds x 6 scales x 4 drifts x 3 simulated hours per density, with a
 voice counted as quiet 6 s after its note off. The D2 to D3 step is the smallest (19%, against 33-47%), because most of a
