@@ -7,9 +7,10 @@ passing push to `main`, so this plan is ordered by priority, not by version numb
 ## Where it stands
 
 - **Working on real hardware:** the audio engine is flashed to an FM-1 from CI-built `.fwsc` packages and confirmed by ear.
-- **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, and the pond screen.
+- **Not yet heard or seen on hardware:** the six scales and eight chords, the new note holds, the soft-focus LFO and the
+  pond screen.
   The colour-note envelope, harmonics, stereo, drone level and reverb tail have only been heard in the emulator.
-- **Biggest gap in the sound:** the envelope range (11.0 dB) and spectral centroid (169 Hz) are short of the reference
+- **Biggest gap in the sound:** the spectral centroid (169 Hz) and envelope range (14.1 dB) are short of the reference
   ([Measurements](#measurements)).
 - **Biggest gap in the panel:** `ENC_KNOB3`, `ENC_KNOB4`, `ENC_PRESETS`, `BTN_SAVE` and the keybed do nothing yet.
 - **Audio budget:** the worst ISR block was 1.3 ms of 2.9 ms when last measured, so there's room for what's planned.
@@ -22,7 +23,7 @@ it. Anything that adds a saved setting comes before moods because moods store th
 | #   | Item                                                        | Impact | Size   | Audio ISR | Why it's here                                                          |
 | --- | ----------------------------------------------------------- | ------ | ------ | --------- | ---------------------------------------------------------------------- |
 | 1   | [Re-baseline](#1-re-baseline)                               | High   | Small  | No        | The numbers and ear checks are out of date; everything below uses them |
-| 2   | [Soft-focus LFO](#2-soft-focus-lfo)                         | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
+| 2   | [Soft-focus LFO](#2-soft-focus-lfo) (host done, unheard)    | Medium | Small  | Light     | A mission feature that moves the same numbers as item 3                |
 | 3   | [Spectral balancing](#3-spectral-balancing)                 | High   | Medium | Yes       | The largest gap to the reference, and every mood inherits the result   |
 | 4   | [Voice leading and settings](#4-voice-leading-and-settings) | High   | Medium | No        | The last missing mission harmony; adds the saved fields moods need     |
 | 5   | [Moods and `BTN_SAVE`](#5-moods-and-btn_save)               | High   | Medium | No        | Turns the panel into something a listener can use; needs items 3-4     |
@@ -57,14 +58,19 @@ After the Hub, in rough priority:
 
 ### 2. Soft-focus LFO
 
-The mission's slow drift as something the instrument does on its own, at 0.1-0.5 Hz.
+The mission's slow drift as something the instrument does on its own. Done and tested on the host; not heard on the FM-1.
 
-- **Amplitude, per voice:** each voice already runs an LFO for pitch drift (`lfo_ph`, 0.07-0.27 Hz), so this can reuse it
-  once per block, with almost no ISR cost.
-- **Filter, global:** there is one low-pass, on the final mix, so cutoff can't be modulated per voice without adding a
-  filter per voice. Modulate `filter_k` around the `ENC_KNOB2` setting instead.
-
-Do this before item 3: it widens the envelope range, so balancing should measure the result.
+- **Amplitude, per voice:** each voice's drift LFO (`lfo_ph`, 0.07-0.27 Hz), read a quarter cycle late so level and pitch
+  don't move together, scales that block's level (`amp_swell()`, `synth.h`). A note only dips, by up to 12 dB
+  (`LFO_AMP_DEPTH`), so it never gets louder than before.
+- **Filter, global:** one low-pass sits on the final mix, so cutoff can't be modulated per voice without a filter per
+  voice. A separate 0.11 Hz LFO swings the `ENC_KNOB2` coefficient by +-40% around its setting (`filter_sweep()`,
+  `LFO_FILTER_DEPTH`). At full open it can only dip.
+- **Depth is a starting guess, to tune by ear.** The envelope range responds sharply: with the filter sweep on, depth 0
+  gives 10.95 dB, 0.25 gives 10.96, 0.5 gives 11.30, 0.73 gives 13.74 and 0.92 gives 18.65. 0.75 was chosen as a clear
+  effect that stops short of notes fading nearly to silence, not to hit the number. The filter sweep barely moves any
+  measured figure, so its depth is a by-ear choice too.
+- **Cost:** one extra `sine()` per voice and one `filter_sweep()` per block. The ISR hasn't been re-timed on the FM-1.
 
 ### 3. Spectral balancing
 
@@ -155,7 +161,8 @@ The full rules are in agents.md's [Distribution](agents.md#distribution-fm-1-fir
 - **Colour notes:** each attacks (about 3 s), holds, releases (about 5 s to -60 dB) and retriggers on its own timer,
   picking up the current chord only when quiet (`envelope.h`, `engine.h`).
 - **Drone:** an octave below the chord and about 6 dB under the colour voices.
-- **Movement:** a slow pitch drift per voice, up to about 13.5 cents. Colour voices have fixed stereo places.
+- **Movement:** a slow pitch drift per voice, up to about 13.5 cents, and a slow swell in each note's level and in the
+  colour low-pass ([soft focus](#2-soft-focus-lfo)). Colour voices have fixed stereo places.
 - **Space:** a Schroeder reverb (`reverb.h`, 4 damped combs into 2 series feedback combs, T60 about 2.7 s), then the
   `ENC_KNOB2` low-pass on the final mix.
 
@@ -245,21 +252,21 @@ this firmware needs no web port. `.github/workflows/pages.yml` builds it at the 
 targets come from the reference recording, a Debussy "Reverie" on a modular synth. The ear is the final judge; these
 numbers guide the work.
 
-| Metric                           | `5beb646` | Now (`e4762d8`) | Target        |
-| -------------------------------- | --------- | --------------- | ------------- |
-| Envelope range p95-p10 (1 s RMS) | 11.4 dB   | 11.0 dB         | 15+ dB        |
-| Spectral centroid                | 193 Hz    | 169 Hz          | 350-500 Hz    |
-| 20-100 Hz band                   | -3.6 dB   | -3.5 dB         | -15 to -25 dB |
-| 1.6-3.2 kHz band                 | -39 dB    | -44 dB          | -25 to -35 dB |
-| L/R correlation                  | 0.51      | 0.49            | 0.3-0.5       |
-| Clipped samples                  | 0         | 0               | 0             |
+| Metric                           | `5beb646` | `e4762d8` | With soft focus | Target        |
+| -------------------------------- | --------- | --------- | --------------- | ------------- |
+| Envelope range p95-p10 (1 s RMS) | 11.4 dB   | 11.0 dB   | 14.1 dB         | 15+ dB        |
+| Spectral centroid                | 193 Hz    | 169 Hz    | 169 Hz          | 350-500 Hz    |
+| 20-100 Hz band                   | -3.6 dB   | -3.5 dB   | -3.5 dB         | -15 to -25 dB |
+| 1.6-3.2 kHz band                 | -39 dB    | -44 dB    | -47 dB          | -25 to -35 dB |
+| L/R correlation                  | 0.51      | 0.49      | 0.49            | 0.3-0.5       |
+| Clipped samples                  | 0         | 0         | 0               | 0             |
 
 `5beb646` is the commit the earlier table was taken on, re-measured with this script. The earlier figures for envelope
 range (7.7 dB), centroid (236 Hz) and the 20-100 Hz band (-8 dB) couldn't be reproduced from that commit, so they came
 from different definitions and aren't comparable. How the Target column was measured isn't recorded, so treat its
 envelope, centroid and band targets as approximate until the reference is measured with this script. Bands are dB below
-the total power. Since `5beb646` the centroid fell 24 Hz and the 1.6-3.2 kHz band fell 5 dB, which fits the
-register limits holding notes lower.
+the total power. Between `5beb646` and `e4762d8` the centroid fell 24 Hz and the 1.6-3.2 kHz band fell 5 dB, which fits the register
+limits holding notes lower. The soft-focus filter sweep lowered the 1.6-3.2 kHz band by another 3 dB, because it only dips.
 
 **Note rate.** `tests/engine_test.c`, host only: 4 seeds x 6 scales x 4 drifts x 3 simulated hours per density, with a
 voice counted as quiet 6 s after its note off. The D2 to D3 step is the smallest (19%, against 33-47%), because most of a

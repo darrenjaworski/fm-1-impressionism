@@ -37,3 +37,24 @@ static inline int32_t pitch_drift(uint32_t inc, int32_t lfo)
     return ((int32_t)(inc >> 16) * lfo) >> 6;
 }
 
+
+/* soft-focus level, once per block: lfo is sine() of the voice's LFO (+-32767), depth is Q15 (16384 = 0.5). Returns a
+   Q15 gain that is 32767 (unity) when lfo is at its top and 32767 - depth at its bottom, so a note only ever dips and
+   the mix can't clip harder than it did. A dip of depth d is 20 * log10(1 - d / 32768) dB: 6 dB at 16384, 12 dB at 24576. The product is at most 65534 * depth, under
+   2^31 for any depth up to 32767. */
+static inline int32_t amp_swell(int32_t lfo, int32_t depth)
+{
+    return 32767 - (((32767 - lfo) * depth) >> 16);
+}
+
+#define FILTER_K_MIN 256                        /* the sweep's floor, Q15: below the darkest colour setting (1024) */
+#define FILTER_K_MAX 32768                      /* fully open: the low-pass passes the signal unchanged */
+
+/* soft-focus cutoff, once per block: the low-pass coefficient k (Q15, FILTER_K_MAX = open) moved up and down by depth
+   (Q15, 13107 = 0.4) of itself as lfo (+-32767) swings, then held to FILTER_K_MIN..FILTER_K_MAX. An open filter can
+   only dip. k * lfo is at most 32768 * 32767, under 2^31. */
+static inline int32_t filter_sweep(int32_t k, int32_t lfo, int32_t depth)
+{
+    int32_t r = k + ((((k * lfo) >> 15) * depth) >> 15);
+    return r < FILTER_K_MIN ? FILTER_K_MIN : r > FILTER_K_MAX ? FILTER_K_MAX : r;
+}

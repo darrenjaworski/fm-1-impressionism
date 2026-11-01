@@ -74,6 +74,11 @@ static struct {
 static const int32_t pan_l[NV] = { 32767, 32767, 12000, 22000 };
 static const int32_t pan_r[NV] = { 32767, 12000, 32767, 22000 };
 static const uint32_t lfo_inc[NV] = { 1744100u, 3240900u, 4736700u, 6731100u };  /* 0.07, 0.13, 0.19, 0.27 Hz */
+#define LFO_AMP_DEPTH 24576                     /* each note's level dips by up to this (Q15, 0.75) of itself: 12 dB, never above unity */
+#define LFO_FILTER_DEPTH 13107                  /* the colour low-pass's coefficient swings +-this (Q15, 0.4) of itself */
+#define LFO_QUARTER 0x40000000u                 /* a quarter cycle: level follows the drift LFO a quarter late, so pitch and level don't move together */
+static const uint32_t filter_lfo_inc = 2742546u;  /* 0.11 Hz, per block: 0.11 * 2^32 / (44100 / 256) */
+static uint32_t filter_lfo_ph;                  /* the filter's own LFO phase (audio ISR only) */
 static volatile uint32_t paused = 0u;          /* BTN_PLAY: 1 = paused (the ISR fades out), 0 = generating */
 static env_t env[NV - 1u];                     /* colour voices: env[v] is voice[v + 1]. Each note attacks, holds, releases (envelope.h) */
 #define HARM_FUND 22938                         /* the main partial's mix, Q15: fundamental 0.70, 2nd 0.20, 3rd 0.10 (sums to 1) */
@@ -104,7 +109,7 @@ static int32_t lp_l, lp_r;                       /* the one-pole filter's own st
 static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t v, i;
-    int32_t bright;
+    int32_t bright, k;
 #if ISR_TIMING && !defined(DINGHY_HOST)
     uint32_t t_start = fm1_ticks();
 #endif
@@ -129,6 +134,7 @@ static void app_audio(int32_t *out, uint32_t n)
         }
         voice[v].amp = amp;
         if (!amp) continue;                     /* silent: costs nothing (g == 0 too, once amp has caught up) */
+        amp = (amp * amp_swell(sine(voice[v].lfo_ph + LFO_QUARTER), LFO_AMP_DEPTH)) >> 15;  /* soft focus: this block's level only, voice[v].amp keeps the glide */
         bright = amp << 2;                      /* upper partials follow the note's level: bright at the start, warmer as it decays */
         if (bright > 32767) bright = 32767;
         for (i = 0; i < n; i++) {
@@ -151,10 +157,13 @@ static void app_audio(int32_t *out, uint32_t n)
         out[2u * i] += (int32_t)wl;
         out[2u * i + 1u] += (int32_t)wr;
     }
-    /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula */
+    /* the "colour" knob: a one-pole low-pass on the finished mix, docs/MAKE-IT-YOURS.md's own suggested formula,
+       with its cutoff swaying around the knob's setting */
+    filter_lfo_ph += filter_lfo_inc;
+    k = filter_sweep(filter_k, sine(filter_lfo_ph), LFO_FILTER_DEPTH);
     for (i = 0; i < n; i++) {
-        lp_l += (out[2u * i] - lp_l) * filter_k >> 15;
-        lp_r += (out[2u * i + 1u] - lp_r) * filter_k >> 15;
+        lp_l += (out[2u * i] - lp_l) * k >> 15;
+        lp_r += (out[2u * i + 1u] - lp_r) * k >> 15;
         out[2u * i] = lp_l > 32767 ? 32767 : lp_l < -32767 ? -32767 : lp_l;           /* dry + wet can pass full scale */
         out[2u * i + 1u] = lp_r > 32767 ? 32767 : lp_r < -32767 ? -32767 : lp_r;
     }

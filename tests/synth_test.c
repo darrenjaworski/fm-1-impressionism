@@ -69,6 +69,45 @@ int main(void)
     }
     check(!bad_sign, "pitch_drift has the sign of lfo at the top step, and grows with lfo");
 
+    /* amp_swell: the soft-focus level gain, Q15, from the voice's LFO. At depth 16384 (0.5) the gain runs from 1.0 at
+       the LFO's top to 0.5 (-6 dB) at its bottom. Literals: 32767 - (65534 * 16384 >> 16) = 16384 at -32767;
+       32767 - (32767 * 16384 >> 16) = 24576 at 0 (8191.5 floors to 8191). */
+    check(amp_swell(32767, 16384) == 32767, "amp_swell at the LFO's top is full level, 32767");
+    check(amp_swell(0, 16384) == 24576, "amp_swell at LFO 0 and depth 0.5 is 24576");
+    check(amp_swell(-32767, 16384) == 16384, "amp_swell at the LFO's bottom and depth 0.5 is half, 16384");
+    check(amp_swell(-32767, 0) == 32767, "amp_swell with depth 0 never changes the level");
+    {
+        int32_t bad = 0, g_prev = amp_swell(-32767, 16384);
+        for (lfo = -32767; lfo <= 32767; lfo += 97) {
+            int32_t g = amp_swell(lfo, 16384);
+            if (g < 16384 || g > 32767 || g < g_prev) bad = 1;   /* never above unity (no clipping), never below -6 dB */
+            g_prev = g;
+        }
+        check(!bad, "amp_swell stays within 16384..32767 and rises with the LFO");
+    }
+
+    /* filter_sweep: the cutoff coefficient k (Q15, 32768 = open) moved by +-depth around itself, clamped to 256..32768.
+       Depth 13107 is 0.4. 16384 * 1.4 = 22938 and * 0.6 = 9830 (22937 here: the shifts floor); 32768 * 0.6 = 19661;
+       1024 * 0.6 = 614 and * 1.4 = 1433. Literals from a separate Python run of the same formula. */
+    check(filter_sweep(16384, 0, 13107) == 16384, "filter_sweep at LFO 0 leaves k alone");
+    check(filter_sweep(16384, 32767, 13107) == 22937, "filter_sweep(16384) at the LFO's top is 22937 (about +40 %)");
+    check(filter_sweep(16384, -32767, 13107) == 9830, "filter_sweep(16384) at the LFO's bottom is 9830 (-40 %)");
+    check(filter_sweep(32768, 32767, 13107) == 32768, "filter_sweep clamps an open filter at 32768 on the up swing");
+    check(filter_sweep(32768, -32767, 13107) == 19661, "filter_sweep(32768) at the LFO's bottom is 19661 (-40 %)");
+    check(filter_sweep(1024, -32767, 13107) == 614 && filter_sweep(1024, 32767, 13107) == 1433,
+          "filter_sweep(1024), the darkest colour, runs 614..1433");
+    check(filter_sweep(300, -32767, 13107) == 256, "filter_sweep never goes below 256, whatever k");
+    {
+        int32_t bad = 0, k;
+        for (k = 1024; k <= 32768; k += 1024)
+            for (lfo = -32767; lfo <= 32767; lfo += 97) {
+                int32_t r = filter_sweep(k, lfo, 13107);
+                if (r < 256 || r > 32768) bad = 1;
+                if (lfo > -32767 && r < filter_sweep(k, lfo - 97, 13107)) bad = 1;
+            }
+        check(!bad, "filter_sweep stays within 256..32768 and rises with the LFO, for every colour setting");
+    }
+
     printf("synth: %s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }
